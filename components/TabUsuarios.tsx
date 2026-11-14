@@ -58,7 +58,8 @@ export default function TabUsuarios({ eventos = [] }: any) {
 
     setEnviando(true); 
 
-    const resultado = await crearAccesoUsuario(form);
+    const { data: { session } } = await supabase.auth.getSession();
+    const resultado = await crearAccesoUsuario(form, session?.access_token ?? '');
 
     if (resultado.success) {
       alert("¡Usuario y acceso creados con éxito!");
@@ -134,7 +135,8 @@ export default function TabUsuarios({ eventos = [] }: any) {
         return;
       }
       
-      const resPwd = await actualizarContrasenaUsuario(editando.id, formEdit.nueva_contrasena);
+      const { data: { session } } = await supabase.auth.getSession();
+      const resPwd = await actualizarContrasenaUsuario(editando.id, formEdit.nueva_contrasena, session?.access_token ?? '');
       if (!resPwd.success) {
         alert("Perfil actualizado, pero hubo un error al cambiar la contraseña: " + resPwd.error);
       } else {

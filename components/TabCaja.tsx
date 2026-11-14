@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import QRCode from 'react-qr-code';
-import { Search, PlusCircle, X, Ticket, UserPlus, Printer, MessageCircle, ShieldCheck, Calendar, Store, Users, Map, Flag, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Search, PlusCircle, X, Ticket, UserPlus, Printer, MessageCircle, ShieldCheck, Calendar, Store, Users, Map as MapIcon, Flag, ChevronDown } from 'lucide-react';
+import CajaCobros, { type Cart, type StaffOrder } from './CajaCobros';
 
 const calcularEdadAlEvento = (fechaNacimiento: string, fechaEvento: string) => {
   if (!fechaNacimiento || !fechaEvento) return 'No definida';
@@ -18,7 +19,7 @@ const calcularEdadAlEvento = (fechaNacimiento: string, fechaEvento: string) => {
   return isNaN(edad) ? 'No definida' : `${edad} años`;
 };
 
-export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos, userRole, userId }: any) {
+export default function TabCaja({ atletas, eventos, recargarDatos, userRole, userId }: any) {
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => { setIsMounted(true); }, []);
 
@@ -26,14 +27,14 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
   const [atletasSeleccionados, setAtletasSeleccionados] = useState<any[]>([]);
   const [eventoSeleccionado, setEventoSeleccionado] = useState<any | null>(null);
 
-  const [paquetesAtletas, setPaquetesAtletas] = useState<{[key: string]: {paquete: string, monto: string}}>({});
+  const [paquetesAtletas, setPaquetesAtletas] = useState<Record<string, 1 | 2>>({});
 
   const [busquedaAtleta, setBusquedaAtleta] = useState('');
   const [mostrarDropdown, setMostrarDropdown] = useState(false);
   const [showQuickRegister, setShowQuickRegister] = useState(false);
   const [ticketReciente, setTicketReciente] = useState<any | null>(null);
   
-  const [alertaDuplicado, setAlertaDuplicado] = useState<any | null>(null);
+  const [cobroEnCurso, setCobroEnCurso] = useState(false);
 
   const [idReimpresion, setIdReimpresion] = useState('');
   const [esRelevo, setEsRelevo] = useState(false);
@@ -55,28 +56,6 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
     nombre: '', apellido: '', genero: 'Hombre', telefono: '', email: '', talla_playera: '', ciudad: 'Matamoros',
     telefono_emergencia: '', fecha_nacimiento: '', club: ''
   });
-
-  const auditarCupos = async () => {
-    if (!eventos || eventos.length === 0) return;
-    
-    const conteo: Record<string, number> = {};
-    
-    await Promise.all(eventos.map(async (ev: any) => {
-      const { count } = await supabase
-        .from('inscripciones')
-        .select('id', { count: 'exact', head: true })
-        .eq('evento_id', ev.id);
-        
-      conteo[String(ev.id)] = count || 0;
-    }));
-    
-    setCuposOcupados(conteo);
-  };
-
-  useEffect(() => {
-    auditarCupos();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventos, inscripciones]);
 
   useEffect(() => {
     const cargarDatosIniciales = async () => {
@@ -120,24 +99,6 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
     cargarDatosIniciales();
   }, [userId, userRole]);
 
-  useEffect(() => {
-    if (eventoSeleccionado) {
-      const nuevosPaquetes = { ...paquetesAtletas };
-      let changed = false;
-      atletasSeleccionados.forEach((a, index) => {
-        if (!nuevosPaquetes[a.id]) {
-          changed = true;
-          if (esRelevo && index > 0 && eventoSeleccionado.precio_2) {
-            nuevosPaquetes[a.id] = { paquete: eventoSeleccionado.nombre_precio_2, monto: eventoSeleccionado.precio_2 };
-          } else {
-            nuevosPaquetes[a.id] = { paquete: eventoSeleccionado.nombre_precio_1, monto: eventoSeleccionado.precio_1 };
-          }
-        }
-      });
-      if (changed) setPaquetesAtletas(nuevosPaquetes);
-    }
-  }, [atletasSeleccionados, eventoSeleccionado, esRelevo]);
-
   const rawClubs = [...clubesDB, ...(atletas || []).map((a: any) => a.club)].filter(Boolean);
   const clubesExistentes = Array.from(new Set(rawClubs)).map(c => String(c).trim()).sort((a, b) => a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' }));
   
@@ -145,6 +106,22 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
   const eventosVisibles = verTodosEventos 
     ? eventosSeguros 
     : eventosSeguros.filter((ev: any) => misEventosPermitidos.includes(ev.id));
+
+  const idsEventos = eventosVisibles.map((evento: { id: string }) => evento.id).join(',');
+  useEffect(() => {
+    if (!idsEventos) return;
+    let active = true;
+    void (async () => {
+      const { data, error } = await supabase.rpc('actv_availability', { p_event_ids: idsEventos.split(',') });
+      if (active) {
+        if (error) setCuposOcupados({});
+        else setCuposOcupados(Object.fromEntries(
+          (data as { event_id: string; used: number }[]).map(row => [row.event_id, row.used]),
+        ));
+      }
+    })();
+    return () => { active = false; };
+  }, [idsEventos, cobroEnCurso]);
 
   const agregarAtletaLista = (atleta: any) => {
     if (!atletasSeleccionados.some(a => a.id === atleta.id)) {
@@ -159,7 +136,8 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
     const telefonoOriginal = ticketReciente.atletas_data[0]?.telefono || '';
     const telefonoLimpio = telefonoOriginal.replace(/\D/g, '');
     // ✅ USA EL CAJERO ORIGINAL EN EL MENSAJE SI EXISTE
-    const msj = `¡Inscripción Confirmada! 🎉\n\nCarrera: ${ticketReciente.evento_nombre}\nCorredor(es): ${ticketReciente.corredores}\nFolio(s): ${ticketReciente.folios}\nTotal: $${ticketReciente.monto_total} MXN\n\n*(Nota: Si deseas tu recibo en formato PDF, solicítalo al cajero en este momento para que te lo comparta)*\n\nAtendido por: ${ticketReciente.cajero_original || nombreCajero}\nVisítanos en: actv.mx\n\n¡Nos vemos en la meta con ACTV!`;
+    const title = ticketReciente.historico ? 'Copia histórica de inscripción · pago sin validar en ACTV' : '¡Inscripción confirmada!';
+    const msj = `${title}\n\nCarrera: ${ticketReciente.evento_nombre}\nCorredor(es): ${ticketReciente.corredores}\nFolio(s): ${ticketReciente.folios}\nImporte registrado: $${ticketReciente.monto_total} MXN\n\nAtendido por: ${ticketReciente.cajero_original || nombreCajero}\nVisítanos en: actv.mx`;
     window.open(`https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(msj)}`, '_blank');
   };
 
@@ -179,6 +157,8 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
     const { data, error } = await query.maybeSingle();
     if (error || !data) {
       alert("No se encontró ningún recibo con ese Folio en la carrera seleccionada.");
+    } else if (data.actv_eligible === false || data.monto_pagado === 'WP / Online') {
+      alert('Este folio no tiene un pago vigente verificado. Consulta conciliación antes de reimprimir.');
     } else {
       // ✅ RESCATE DEL CAJERO ORIGINAL DE FORMA SEGURA
       let cajeroOrig = null;
@@ -199,44 +179,11 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
         corredores: `${data.atletas.nombre} ${data.atletas.apellido}`,
         atletas_data: [data.atletas],
         cajero_original: cajeroOrig, // Guardamos el nombre recuperado
+        historico: data.actv_eligible !== true,
         esReimpresion: true
       });
       setTimeout(() => window.print(), 500);
     }
-  };
-
-  const procesarReimpresionDesdeAlerta = async () => {
-    if(!alertaDuplicado) return;
-
-    // ✅ RESCATE DEL CAJERO ORIGINAL EN ALERTAS
-    let cajeroOrig = null;
-    if (alertaDuplicado.inscripcion.usuario_id) {
-      const { data: pData } = await supabase.from('perfiles').select('nombre_completo, rol').eq('id', alertaDuplicado.inscripcion.usuario_id).maybeSingle();
-      if (pData) cajeroOrig = pData.nombre_completo || pData.rol;
-    }
-
-    setTicketReciente({
-      id_db: alertaDuplicado.inscripcion.id,
-      fecha_hora: alertaDuplicado.inscripcion.created_at,
-      evento_nombre: eventoSeleccionado.nombre_carrera,
-      evento_fecha: eventoSeleccionado.fecha,
-      paquete_comprado: alertaDuplicado.inscripcion.paquete_comprado,
-      monto_total: alertaDuplicado.inscripcion.monto_pagado,
-      folios: alertaDuplicado.inscripcion.folio_asignado,
-      folios_array: [alertaDuplicado.inscripcion.folio_asignado],
-      corredores: `${alertaDuplicado.atleta.nombre} ${alertaDuplicado.atleta.apellido}`,
-      atletas_data: [alertaDuplicado.atleta],
-      cajero_original: cajeroOrig,
-      esReimpresion: true
-    });
-    
-    setAlertaDuplicado(null);
-    setAtletasSeleccionados([]);
-    setEventoSeleccionado(null);
-    setPaquetesAtletas({});
-    setEsRelevo(false);
-    
-    setTimeout(() => window.print(), 500);
   };
 
   const handleSubmitQuickAtleta = async (e: any) => {
@@ -295,111 +242,53 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
     setEnviando(false);
   };
 
-  const handleSubmitVenta = async (e: any) => {
-    e.preventDefault();
-    setEnviando(true);
-    
-    // ✅ Se incluye usuario_id para que las alertas sepan de quién es el ticket duplicado
-    const { data: inscripcionesDB, error: errDB } = await supabase.from('inscripciones').select('id, atleta_id, folio_asignado, monto_pagado, paquete_comprado, created_at, usuario_id').eq('evento_id', eventoSeleccionado.id).limit(10000);
-    if (errDB) { alert("Hubo un error al verificar los folios: " + errDB.message); setEnviando(false); return; }
+  const paquete = (athleteId: string, index: number): 1 | 2 =>
+    paquetesAtletas[athleteId] ?? (esRelevo && index > 0 && eventoSeleccionado?.precio_2 ? 2 : 1);
+  const carrito: Cart | null = eventoSeleccionado && atletasSeleccionados.length ? {
+    eventId: eventoSeleccionado.id,
+    relay: esRelevo && atletasSeleccionados.length > 1,
+    items: atletasSeleccionados.map((athlete, index) => ({
+      athlete_id: athlete.id,
+      package: paquete(athlete.id, index),
+    })),
+  } : null;
+  const totalEstimado = carrito?.items.reduce((total, item) =>
+    total + Math.round(Number(item.package === 2 ? eventoSeleccionado.precio_2 : eventoSeleccionado.precio_1) * 100),
+  0) ?? 0;
+  const atletasPorId = useMemo(() => new Map((atletas || []).map((atleta: { id: string }) => [atleta.id, atleta])), [atletas]);
 
-    for (let atleta of atletasSeleccionados) {
-      const registroExistente = inscripcionesDB?.find(i => i.atleta_id === atleta.id);
-      if (registroExistente) {
-        setAlertaDuplicado({ atleta: atleta, inscripcion: registroExistente });
-        setEnviando(false);
-        return;
-      }
-    }
-
-    const foliosActuales = inscripcionesDB ? inscripcionesDB.length : 0;
-    const cupoMaximoParsed = eventoSeleccionado.cupo_maximo ? parseInt(eventoSeleccionado.cupo_maximo, 10) : Infinity;
-    
-    if (foliosActuales + atletasSeleccionados.length > cupoMaximoParsed) {
-      const disponibles = cupoMaximoParsed - foliosActuales;
-      alert(`¡Límite de cupo alcanzado!\nQuedan ${disponibles > 0 ? disponibles : 0} lugares disponibles en esta carrera y estás intentando registrar ${atletasSeleccionados.length} atleta(s).`);
-      setEnviando(false);
-      return;
-    }
-
-    let numerosOcupados: number[] = [];
-    if (inscripcionesDB && inscripcionesDB.length > 0) {
-      numerosOcupados = inscripcionesDB
-        .map((i: any) => parseInt(i.folio_asignado.replace(/\D/g, ''), 10))
-        .filter((n: number) => !isNaN(n));
-    }
-
-    let folioBaseAProbar = eventoSeleccionado.folio_inicial ? parseInt(eventoSeleccionado.folio_inicial, 10) : 1;
-    let baseRelayAsignado = 0; 
-
-    const ventas = atletasSeleccionados.map((atleta, index) => {
-      let baseFolioNumStr = '';
-      let sufijoLetra = '';
-
-      if (esRelevo && index > 0) {
-        baseFolioNumStr = baseRelayAsignado.toString().padStart(3, '0');
-        sufijoLetra = `-${String.fromCharCode(65 + index)}`; 
-      } else {
-        while (numerosOcupados.includes(folioBaseAProbar)) {
-          folioBaseAProbar++;
-        }
-        
-        baseFolioNumStr = folioBaseAProbar.toString().padStart(3, '0');
-        sufijoLetra = esRelevo ? '-A' : ''; 
-        
-        baseRelayAsignado = folioBaseAProbar;
-        numerosOcupados.push(folioBaseAProbar);
-        folioBaseAProbar++; 
-      }
-
-      const folioFinal = `${baseFolioNumStr}${sufijoLetra}`;
-      const config = paquetesAtletas[atleta.id] || { paquete: eventoSeleccionado.nombre_precio_1, monto: eventoSeleccionado.precio_1 };
-      
-      return {
-        atleta_id: atleta.id,
-        evento_id: eventoSeleccionado.id,
-        folio_asignado: folioFinal,
-        monto_pagado: config.monto,
-        metodo_pago: 'efectivo',
-        paquete_comprado: config.paquete,
-        usuario_id: userId
-      };
+  const mostrarRecibo = (order: StaffOrder, cart: Cart, method: 'cash' | 'terminal') => {
+    const records = order.registrations ?? [];
+    if (order.state !== 'issued' || !records.length) return;
+    const evento = eventosSeguros.find((event: { id: string }) => event.id === cart.eventId);
+    const participantes = records.map((record, index) =>
+      (atletasPorId.get(record.atleta_id ?? cart.items[index]?.athlete_id) ?? { nombre: 'Corredor', apellido: '' }) as {
+        nombre: string;
+        apellido: string;
+      },
+    );
+    const folios = records.map(record => record.folio_asignado);
+    setTicketReciente({
+      id_db: records[0].id,
+      order_id: order.order_id,
+      fecha_hora: records[0].created_at,
+      evento_nombre: evento?.nombre_carrera ?? 'Carrera ACTV',
+      evento_fecha: evento?.fecha,
+      paquete_comprado: cart.relay ? 'Modalidad Relevos / Equipo' : [...new Set(records.map(row => row.paquete_comprado))].join(' + '),
+      metodo_pago: method === 'cash' ? 'Efectivo' : 'Tarjeta',
+      monto_total: (order.amount / 100).toFixed(2),
+      folios: folios.join(', '),
+      folios_array: folios,
+      corredores: participantes.map(atleta => `${atleta.nombre} ${atleta.apellido}`.trim()).join(', '),
+      atletas_data: participantes,
+      esReimpresion: false,
     });
-
-    const { data, error } = await supabase.from('inscripciones').insert(ventas).select();
-    if (error) {
-      alert("Error al concretar la venta: " + error.message);
-    } else {
-      auditarCupos(); 
-      const todosLosFolios = data.map(d => d.folio_asignado);
-      const descPaquete = esRelevo ? 'Modalidad Relevos / Equipo' : Array.from(new Set(ventas.map(v => v.paquete_comprado))).join(' + ');
-
-      setTicketReciente({
-        id_db: data[0].id,
-        fecha_hora: data[0].created_at,
-        evento_nombre: eventoSeleccionado.nombre_carrera,
-        evento_fecha: eventoSeleccionado.fecha,
-        paquete_comprado: descPaquete,
-        monto_total: totalCobrar.toString(),
-        folios: todosLosFolios.join(', '), 
-        folios_array: todosLosFolios,
-        corredores: atletasSeleccionados.map(a => `${a.nombre} ${a.apellido}`).join(', '),
-        atletas_data: atletasSeleccionados,
-        esReimpresion: false
-      });
-      
-      setAtletasSeleccionados([]);
-      setEventoSeleccionado(null);
-      setPaquetesAtletas({});
-      setEsRelevo(false);
-      if (recargarDatos) recargarDatos();
-    }
-    setEnviando(false);
+    setAtletasSeleccionados([]);
+    setEventoSeleccionado(null);
+    setPaquetesAtletas({});
+    setEsRelevo(false);
+    if (recargarDatos) recargarDatos();
   };
-
-  const totalCobrar = eventoSeleccionado 
-    ? atletasSeleccionados.reduce((sum, a) => sum + parseFloat(paquetesAtletas[a.id]?.monto || eventoSeleccionado.precio_1 || 0), 0)
-    : 0;
 
   return (
     <section className="flex flex-col relative pb-16 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -458,7 +347,8 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
           <button 
             type="button" 
             onClick={() => { setLadaTelefono('+52'); setLadaEmergencia('+52'); setShowQuickRegister(true); }} 
-            className="bg-slate-900 text-white text-xs font-semibold py-2 px-4 rounded-xl flex items-center hover:bg-black transition-all shadow-sm active:scale-[0.98]"
+            disabled={cobroEnCurso}
+            className="bg-slate-900 text-white text-xs font-semibold py-2 px-4 rounded-xl flex items-center hover:bg-black transition-all shadow-sm active:scale-[0.98] disabled:opacity-45"
           >
             <UserPlus className="w-4 h-4 mr-1.5"/> Nuevo Atleta
           </button>
@@ -467,7 +357,7 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
 
       {/* ÁREA DE TRABAJO PRINCIPAL */}
       <div className="bg-white p-5 md:p-8 flex-grow rounded-b-2xl shadow-sm border-x border-b border-slate-200 w-full no-print">
-        <form onSubmit={handleSubmitVenta} className="space-y-8">
+        <fieldset disabled={cobroEnCurso} inert={cobroEnCurso} className="space-y-8 disabled:opacity-60">
           
           <div className="md:col-span-2 relative">
             <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">1. Buscar y Agregar Corredores *</label>
@@ -478,7 +368,7 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
             
             {mostrarDropdown && busquedaAtleta && (
               <ul className="absolute z-20 w-full bg-white border border-slate-200 shadow-xl rounded-xl mt-2 overflow-hidden max-h-60 overflow-y-auto divide-y divide-slate-50">
-                {(atletas || []).filter((a: any) => (a.nombre + ' ' + a.apellido + ' ' + a.telefono).toLowerCase().includes(busquedaAtleta.toLowerCase())).map((a: any) => (
+                {(atletas || []).filter((a: any) => (a.nombre + ' ' + a.apellido + ' ' + a.telefono).toLowerCase().includes(busquedaAtleta.toLowerCase())).slice(0, 20).map((a: any) => (
                   <li key={a.id} className="p-3.5 hover:bg-slate-50 cursor-pointer flex justify-between items-center transition-colors" onClick={() => agregarAtletaLista(a)}>
                     <div><p className="font-bold text-slate-900 text-sm">{a.nombre} {a.apellido}</p><p className="text-[11px] font-medium text-slate-500 mt-0.5">{a.telefono}</p></div>
                     <PlusCircle className="text-slate-400 w-5 h-5 hover:text-slate-900 transition-colors" />
@@ -503,19 +393,8 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
                   id="toggleRelevo"
                   checked={esRelevo}
                   onChange={(e) => {
-                    const relevoActivo = e.target.checked;
-                    setEsRelevo(relevoActivo);
-                    if (eventoSeleccionado) {
-                      const nuevosPaquetes = { ...paquetesAtletas };
-                      atletasSeleccionados.forEach((a, idx) => {
-                        if (relevoActivo && idx > 0 && eventoSeleccionado.precio_2) {
-                          nuevosPaquetes[a.id] = { paquete: eventoSeleccionado.nombre_precio_2, monto: eventoSeleccionado.precio_2 };
-                        } else {
-                          nuevosPaquetes[a.id] = { paquete: eventoSeleccionado.nombre_precio_1, monto: eventoSeleccionado.precio_1 };
-                        }
-                      });
-                      setPaquetesAtletas(nuevosPaquetes);
-                    }
+                    setEsRelevo(e.target.checked);
+                    setPaquetesAtletas({});
                   }}
                   className="w-4 h-4 text-slate-900 bg-white border-slate-300 rounded focus:ring-slate-900 cursor-pointer"
                 />
@@ -533,13 +412,11 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
             
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 max-h-[650px] overflow-y-auto pb-4 pt-1 px-1 custom-scrollbar">
               {eventosVisibles.map((ev: any) => {
-                const foliosVendidos = cuposOcupados[String(ev.id)] !== undefined 
-                  ? cuposOcupados[String(ev.id)] 
-                  : (inscripciones || []).filter((i: any) => String(i.evento_id) === String(ev.id)).length;
-                  
-                const cupoMaximoParsed = ev.cupo_maximo ? parseInt(ev.cupo_maximo, 10) : Infinity;
-                const lugaresDisponibles = cupoMaximoParsed - foliosVendidos;
-                const agotado = lugaresDisponibles <= 0;
+                const foliosUsados = cuposOcupados[String(ev.id)];
+                const lugaresDisponibles = ev.cupo_maximo == null || foliosUsados === undefined
+                  ? null
+                  : Number(ev.cupo_maximo) - foliosUsados;
+                const agotado = lugaresDisponibles !== null && lugaresDisponibles <= 0;
                 const esSeleccionado = eventoSeleccionado?.id === ev.id;
                 
                 return (
@@ -565,7 +442,7 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
                         <span className="text-[10px] text-slate-400 font-bold flex items-center tracking-wide"><Calendar className="w-3.5 h-3.5 mr-1.5 text-slate-400"/>{ev.fecha}</span>
                         <div className="flex justify-between items-center w-full mt-1">
                           <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${agotado ? 'text-slate-500 bg-slate-100' : 'text-slate-900 bg-slate-100'}`}>
-                            {agotado ? 'Agotado' : `${lugaresDisponibles} cupos`}
+                            {agotado ? 'Agotado' : lugaresDisponibles === null ? 'Verificar cupo' : `${lugaresDisponibles} cupos`}
                           </span>
                           <span className="text-[10px] font-black text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">{ev.distancia}</span>
                         </div>
@@ -589,7 +466,7 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
               
               <div className="space-y-2.5">
                 {atletasSeleccionados.map((a, index) => {
-                  const currentPkg = paquetesAtletas[a.id]?.paquete || eventoSeleccionado.nombre_precio_1;
+                  const currentPkg = paquete(a.id, index);
                   const labelRelevo = index === 0 ? 'Capitán / Titular (Costo Base)' : `Corredor ${index + 1} (Relevo Adicional)`;
                   
                   return (
@@ -603,20 +480,16 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
                         <select
                           value={currentPkg}
                           onChange={(e) => {
-                            const isPkg2 = e.target.value === eventoSeleccionado.nombre_precio_2;
                             setPaquetesAtletas({
                               ...paquetesAtletas,
-                              [a.id]: {
-                                paquete: e.target.value,
-                                monto: isPkg2 ? eventoSeleccionado.precio_2 : eventoSeleccionado.precio_1
-                              }
+                              [a.id]: e.target.value === '2' ? 2 : 1,
                             });
                           }}
                           className="w-full sm:w-64 bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-lg px-3 py-2.5 outline-none focus:border-slate-400 transition-all cursor-pointer appearance-none pr-8"
                         >
-                          <option value={eventoSeleccionado.nombre_precio_1}>{eventoSeleccionado.nombre_precio_1} - ${eventoSeleccionado.precio_1}</option>
+                          <option value={1}>{eventoSeleccionado.nombre_precio_1} - ${eventoSeleccionado.precio_1}</option>
                           {eventoSeleccionado.precio_2 && (
-                            <option value={eventoSeleccionado.nombre_precio_2}>{eventoSeleccionado.nombre_precio_2} - ${eventoSeleccionado.precio_2}</option>
+                            <option value={2}>{eventoSeleccionado.nombre_precio_2} - ${eventoSeleccionado.precio_2}</option>
                           )}
                         </select>
                         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
@@ -628,58 +501,18 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
             </div>
           )}
 
-          <div className="bg-slate-900 p-5 md:p-6 rounded-2xl flex flex-col md:flex-row justify-between items-center text-white gap-5 shadow-lg shadow-slate-900/10">
-            <div className="text-center md:text-left w-full md:w-auto">
-              <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Total a cobrar (Efectivo)</p>
-              <p className="text-3xl font-black tracking-tight">${totalCobrar} MXN</p>
-            </div>
-            <button type="submit" disabled={enviando || atletasSeleccionados.length === 0 || !eventoSeleccionado} className="w-full md:w-auto bg-white text-slate-900 hover:bg-slate-50 px-10 py-3.5 rounded-xl font-black uppercase tracking-widest disabled:opacity-50 transition-all active:scale-[0.99] text-sm shadow-md">
-              {enviando ? 'Procesando...' : 'Confirmar Venta'}
-            </button>
-          </div>
-        </form>
+        </fieldset>
+        <div className="mt-6">
+          {userId && <CajaCobros userId={userId} cart={carrito} estimate={totalEstimado} onLock={setCobroEnCurso} onReceipt={mostrarRecibo} />}
+        </div>
       </div>
 
       {/* BARRA DE ESTADO INFERIOR FIJA */}
       <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md text-slate-500 px-4 py-3 flex justify-between items-center text-[10px] sm:text-xs font-bold z-40 no-print border-t border-slate-200/80">
         <div className="flex items-center gap-2"><Users className="w-3.5 h-3.5 text-slate-400 hidden sm:block"/><span>ATLETAS: <span className="text-slate-900 font-black">{atletas?.length || 0}</span></span></div>
         <div className="flex items-center gap-2"><Flag className="w-3.5 h-3.5 text-slate-400 hidden sm:block"/><span>CLUBES: <span className="text-slate-900 font-black">{clubesExistentes.length}</span></span></div>
-        <div className="flex items-center gap-2"><Map className="w-3.5 h-3.5 text-slate-400 hidden sm:block"/><span>CARRERAS: <span className="text-slate-900 font-black">{eventos?.length || 0}</span></span></div>
+        <div className="flex items-center gap-2"><MapIcon className="w-3.5 h-3.5 text-slate-400 hidden sm:block"/><span>CARRERAS: <span className="text-slate-900 font-black">{eventos?.length || 0}</span></span></div>
       </div>
-
-      {/* ========================================================== */}
-      {/* MODAL: ALERTA INTELIGENTE DE DUPLICADO CON AUTO-REPRINT */}
-      {/* ========================================================== */}
-      {isMounted && alertaDuplicado && createPortal(
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 no-print overflow-y-auto">
-          <div className="bg-white p-8 max-w-sm w-full rounded-3xl shadow-2xl relative border border-slate-100 animate-in zoom-in-95 duration-200">
-            <button type="button" onClick={() => setAlertaDuplicado(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full transition-colors z-20"><X size={16}/></button>
-            
-            <div className="text-center mb-6">
-              <div className="bg-amber-50 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-200/60 shadow-sm">
-                <AlertTriangle className="w-8 h-8 text-amber-600"/>
-              </div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-none mb-2">¡Atleta Duplicado!</h3>
-              <p className="text-sm font-medium text-slate-600 leading-relaxed"> El sistema ha detectado que <strong className="text-slate-900">{alertaDuplicado.atleta.nombre} {alertaDuplicado.atleta.apellido}</strong> ya cuenta con una inscripción activa en este evento.</p>
-            </div>
-            
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 mb-6 flex flex-col items-center">
-              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1">Folio Asignado Actualmente</p>
-              <p className="text-3xl font-black text-amber-600 tracking-tighter">{alertaDuplicado.inscripcion.folio_asignado}</p>
-            </div>
-
-            <div className="space-y-2">
-              <button onClick={procesarReimpresionDesdeAlerta} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold flex items-center justify-center hover:bg-black transition-colors text-sm shadow-md active:scale-[0.98]">
-                <Printer className="mr-2 w-4 h-4"/> Sí, Reimprimir Ticket
-              </button>
-              <button onClick={() => setAlertaDuplicado(null)} className="w-full bg-white border border-slate-200 text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-50 hover:text-slate-900 transition-colors text-sm shadow-sm active:scale-[0.98]">
-                Cancelar Venta
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
 
       {/* ========================================================== */}
       {/* MODAL REGISTRO EXPRESS */}
@@ -798,7 +631,7 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
           <div className="bg-white p-8 max-w-sm w-full text-center relative font-sans shadow-2xl rounded-3xl border border-slate-100 animate-in zoom-in-95 duration-200">
             <button type="button" onClick={() => setTicketReciente(null)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-900 bg-slate-100 p-1.5 rounded-full transition-colors"><X size={16} /></button>
             <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-1">ACTV</h3>
-            <p className="text-[10px] text-slate-500 border-b border-slate-200 pb-4 mb-5 uppercase font-bold tracking-widest">{ticketReciente.esReimpresion ? 'Reimpresión de Ticket' : 'Inscripción Exitosa'}</p>
+            <p className="text-[10px] text-slate-500 border-b border-slate-200 pb-4 mb-5 uppercase font-bold tracking-widest">{ticketReciente.historico ? 'Copia histórica · pago sin validar' : ticketReciente.esReimpresion ? 'Reimpresión de Ticket' : 'Pago confirmado · folios emitidos'}</p>
             <div className="text-left text-sm space-y-3 mb-6 text-slate-700">
               <p><strong className="text-slate-900">Evento:</strong> {ticketReciente.evento_nombre}</p>
               <p><strong className="text-slate-900">Atletas:</strong> {ticketReciente.corredores}</p>
@@ -874,12 +707,12 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
               <div style={{ textAlign: 'center', marginBottom: '5px' }}>
                 <img src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png" alt="logo actv" style={{ width: '30mm', height: 'auto', margin: '0 auto 5px auto', display: 'block', filter: 'grayscale(100%) contrast(1.5)' }} />
                 <h2 style={{ fontSize: '15pt', margin: 0, fontWeight: '900' }}>ACTV SaaS</h2>
-                {ticketReciente.esReimpresion && <p style={{ fontSize: '10pt', margin: '2px 0', fontWeight: '900', borderTop: '1px dashed black', borderBottom: '1px dashed black', padding: '2px 0' }}>REIMPRESIÓN</p>}
+                {ticketReciente.esReimpresion && <p style={{ fontSize: '10pt', margin: '2px 0', fontWeight: '900', borderTop: '1px dashed black', borderBottom: '1px dashed black', padding: '2px 0' }}>{ticketReciente.historico ? 'COPIA HISTÓRICA · PAGO SIN VALIDAR' : 'REIMPRESIÓN'}</p>}
                 <p style={{ fontSize: '9pt', margin: 0, padding: '2px', backgroundColor: 'black', color: 'white' }}>{copia === 1 ? 'ORIGINAL - CLIENTE' : 'COPIA - ORGANIZADOR'}</p>
                 <p style={{ marginTop: '5px' }}>==========================</p>
               </div>
               
-              <p><strong>Ticket:</strong> {ticketReciente.id_db || 'N/A'}</p>
+              <p><strong>Ticket:</strong> {ticketReciente.order_id || ticketReciente.id_db || 'N/A'}</p>
               {/* ✅ AQUÍ SE IMPRIME EL CAJERO ORIGINAL EN LA MINIPRESORA */}
               <p><strong>Cajero:</strong> {ticketReciente.cajero_original || nombreCajero || 'Usuario'}</p>
               <p><strong>Fecha:</strong> {new Date(ticketReciente.fecha_hora || Date.now()).toLocaleString('es-MX')}</p>
@@ -900,7 +733,8 @@ export default function TabCaja({ atletas, eventos, inscripciones, recargarDatos
 
               <p>==========================</p>
               <p><strong>Paquete:</strong> {ticketReciente.paquete_comprado}</p>
-              <p style={{ fontSize: '12pt', fontWeight: '900' }}>PAGO TOTAL: ${ticketReciente.monto_total} MXN</p>
+              {ticketReciente.metodo_pago && <p><strong>Método:</strong> {ticketReciente.metodo_pago}</p>}
+              <p style={{ fontSize: '12pt', fontWeight: '900' }}>{ticketReciente.historico ? 'IMPORTE REGISTRADO:' : 'PAGO TOTAL:'} ${ticketReciente.monto_total} MXN</p>
               
               <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
                 <QRCode value={ticketReciente.folios} size={90} style={{ height: "auto", maxWidth: "25mm", width: "25mm" }} />

@@ -1,0 +1,6 @@
+{
+  "nodeModulesDir": "none",
+  "compilerOptions": { "lib": ["deno.window"] },
+  "lint": { "rules": { "exclude": ["no-import-prefix"] } },
+  "fmt": { "lineWidth": 110, "singleQuote": true }
+}

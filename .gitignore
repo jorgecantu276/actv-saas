@@ -43,3 +43,5 @@ next-env.d.ts
 # Local deployment archives and CLI link
 /*.zip
 /.hostinger/
+/supabase/.temp/
+/supabase/.branches/
