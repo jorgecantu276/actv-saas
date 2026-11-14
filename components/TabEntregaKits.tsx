@@ -98,7 +98,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: any) {
     const fechaLimite = hace30Dias.toISOString().split('T')[0];
 
     let query = supabase.from('inscripciones').select(`
-      id, folio_asignado, kit_entregado, foto_evidencia, paquete_comprado, created_at,
+      id, folio_asignado, kit_entregado, foto_evidencia, paquete_comprado, created_at, actv_eligible, monto_pagado,
       atletas (nombre, apellido, talla_playera, telefono),
       eventos!inner (nombre_carrera, fecha)
     `)
@@ -121,6 +121,10 @@ export default function TabEntregaKits({ eventos, userRole, userId }: any) {
 
   const confirmarEntrega = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!modalEntrega || modalEntrega.actv_eligible === false || modalEntrega.monto_pagado === 'WP / Online') {
+      alert('Consulta conciliación antes de entregar este kit.');
+      return;
+    }
     if (!fotoArchivo) return alert("Por favor toma una foto como evidencia.");
     setProcesando(true);
 
@@ -139,14 +143,22 @@ export default function TabEntregaKits({ eventos, userRole, userId }: any) {
         .from('evidencias_kits')
         .getPublicUrl(filePath);
 
-      const { error: updateError } = await supabase.from('inscripciones')
+      const { data: updated, error: updateError } = await supabase.from('inscripciones')
         .update({ 
           kit_entregado: true, 
           foto_evidencia: publicUrl 
         })
-        .eq('id', modalEntrega.id);
+        .eq('id', modalEntrega.id)
+        .or('actv_eligible.is.null,actv_eligible.eq.true')
+        .or('kit_entregado.is.null,kit_entregado.eq.false')
+        .select('id')
+        .maybeSingle();
 
       if (updateError) throw updateError;
+      if (!updated) {
+        await supabase.storage.from('evidencias_kits').remove([filePath]);
+        throw new Error('El folio cambió de estado. Consulta la inscripción antes de entregar el kit.');
+      }
 
       cerrarModal();
       cargarDatos(); 
@@ -321,6 +333,8 @@ export default function TabEntregaKits({ eventos, userRole, userId }: any) {
                   <span className="text-2xl font-black text-slate-800 tracking-tighter">{i.folio_asignado}</span>
                   {i.kit_entregado ? (
                     <span className="bg-green-100 text-green-700 text-[10px] font-black uppercase px-2.5 py-1 rounded border border-green-200 flex items-center tracking-widest"><CheckCircle className="w-3 h-3 mr-1"/> Entregado</span>
+                  ) : i.actv_eligible === false || i.monto_pagado === 'WP / Online' ? (
+                    <span className="bg-amber-100 text-amber-800 text-[10px] font-bold uppercase px-2.5 py-1 rounded border border-amber-200">Revisar pago</span>
                   ) : (
                     <span className="bg-amber-100 text-amber-700 text-[10px] font-black uppercase px-2.5 py-1 rounded border border-amber-200 tracking-widest">Pendiente</span>
                   )}
@@ -331,6 +345,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: any) {
                   <p className="text-[11px] font-medium text-slate-500 uppercase mt-1.5 line-clamp-1 flex items-center">
                     <Calendar className="w-3 h-3 mr-1"/> {i.eventos?.nombre_carrera}
                   </p>
+                  {i.actv_eligible == null && <p className="mt-1 text-xs text-slate-500">Registro histórico · pago sin validar en ACTV</p>}
                 </div>
 
                 <div className="flex gap-2 mb-5 text-xs font-bold">
@@ -340,7 +355,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: any) {
 
                 <div className="pt-4 border-t border-slate-100">
                   {!i.kit_entregado ? (
-                    <button onClick={() => setModalEntrega(i)} className="w-full py-3.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-black uppercase tracking-widest transition-all active:scale-95 shadow-md flex justify-center items-center">
+                    <button disabled={i.actv_eligible === false || i.monto_pagado === 'WP / Online'} onClick={() => setModalEntrega(i)} className="w-full py-3.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-black uppercase tracking-widest transition-all active:scale-95 shadow-md flex justify-center items-center disabled:opacity-45">
                       <Package className="w-4 h-4 mr-2"/> Entregar Kit
                     </button>
                   ) : (

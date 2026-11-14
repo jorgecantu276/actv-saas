@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import QRCode from 'react-qr-code';
+import { consultarPago, describePago, puedeReimprimir } from '../lib/eligibilidadFolio';
 import { Search, Download, Users, Edit, Trash2, ArrowUpDown, X, Mail, Phone, MapPin, Award, Calendar, Timer, FileSpreadsheet, ChevronLeft, ChevronRight, UserCircle, ChevronDown, History, Printer, MessageCircle } from 'lucide-react';
 
 // ✅ FUNCIÓN: Capitaliza la primera letra de cada palabra
@@ -114,26 +115,33 @@ export default function TabListaAtletas({ atletas, clubes, recargarDatos }: any)
   // =======================================================
   // ✅ LOGICA PARA REIMPRIMIR TICKETS
   // =======================================================
-  const reimprimirTicket = (inscripcion: any) => {
+  const reimprimirTicket = async (inscripcion: any) => {
+    const pago = await consultarPago(inscripcion.id).catch(() => null);
+    if (!pago || !puedeReimprimir(pago)) {
+      alert('Este folio no tiene un pago vigente verificable. Consulta conciliación.');
+      return;
+    }
     setTicketReciente({
       id_db: inscripcion.id,
       fecha_hora: inscripcion.created_at,
       evento_nombre: inscripcion.eventos?.nombre_carrera,
       evento_fecha: inscripcion.eventos?.fecha,
       paquete_comprado: inscripcion.paquete_comprado,
-      monto_total: inscripcion.monto_pagado,
+      monto_total: pago.monto_pagado,
       folios: inscripcion.folio_asignado,
       folios_array: [inscripcion.folio_asignado],
       corredores: `${capitalizarNombres(atletaHistorial.atleta.nombre)} ${capitalizarNombres(atletaHistorial.atleta.apellido)}`,
       atletas_data: [atletaHistorial.atleta],
       cajero: inscripcion.perfiles?.nombre_completo || 'Usuario', 
+      historico: pago.actv_eligible !== true,
       esReimpresion: true 
     });
   };
 
   const enviarTicketWA = () => {
     if (!ticketReciente) return;
-    const msj = `¡Inscripción Confirmada! 🎉\n\nCarrera: ${ticketReciente.evento_nombre}\nCorredor(es): ${ticketReciente.corredores}\nFolio(s): ${ticketReciente.folios}\nTotal: $${ticketReciente.monto_total} MXN\n\n¡Nos vemos en la meta con ACTV!`;
+    const title = ticketReciente.historico ? 'Copia histórica de inscripción · pago sin validar en ACTV' : '¡Inscripción confirmada!';
+    const msj = `${title}\n\nCarrera: ${ticketReciente.evento_nombre}\nCorredor(es): ${ticketReciente.corredores}\nFolio(s): ${ticketReciente.folios}\nImporte registrado: $${ticketReciente.monto_total} MXN`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msj)}`, '_blank');
   };
 
@@ -488,11 +496,12 @@ export default function TabListaAtletas({ atletas, clubes, recargarDatos }: any)
                     <div className="flex justify-between items-end text-xs mt-auto pt-3 border-t border-slate-200">
                       <div>
                         <span className="text-slate-600 font-medium block">{insc.paquete_comprado}</span>
-                        <span className="font-bold text-green-600 mt-0.5 block">{insc.monto_pagado !== 'WP / Online' ? `$${insc.monto_pagado} MXN` : 'Pagado Online'}</span>
+                        <span className="font-bold text-slate-600 mt-0.5 block">{describePago(insc)}</span>
                       </div>
                       <button 
+                        disabled={!puedeReimprimir(insc)}
                         onClick={() => reimprimirTicket(insc)} 
-                        className="flex items-center bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors font-bold shadow-sm active:scale-95"
+                        className="flex items-center bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors font-bold shadow-sm active:scale-95 disabled:opacity-40"
                       >
                         <Printer className="w-3.5 h-3.5 mr-1.5" /> Ticket
                       </button>
@@ -514,7 +523,7 @@ export default function TabListaAtletas({ atletas, clubes, recargarDatos }: any)
             <button type="button" onClick={() => setTicketReciente(null)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full transition-all"><X size={16} /></button>
             
             <h3 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">ACTV</h3>
-            <p className="text-[10px] text-slate-400 border-b border-slate-200 pb-4 mb-5 uppercase font-bold tracking-widest">Reimpresión de Ticket</p>
+            <p className="text-[10px] text-slate-400 border-b border-slate-200 pb-4 mb-5 uppercase font-bold tracking-widest">{ticketReciente.historico ? 'Copia histórica · pago sin validar' : 'Reimpresión de ticket'}</p>
             
             <div className="text-left text-sm space-y-3 mb-6 text-slate-700">
               <p><strong className="text-slate-900">Evento:</strong> {ticketReciente.evento_nombre}</p>
@@ -591,7 +600,7 @@ export default function TabListaAtletas({ atletas, clubes, recargarDatos }: any)
               <div style={{ textAlign: 'center', marginBottom: '5px' }}>
                 <img src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png" alt="logo actv" style={{ width: '30mm', height: 'auto', margin: '0 auto 5px auto', display: 'block', filter: 'grayscale(100%) contrast(1.5)' }} />
                 <h2 style={{ fontSize: '15pt', margin: 0, fontWeight: '900' }}>ACTV SaaS</h2>
-                {ticketReciente.esReimpresion && <p style={{ fontSize: '10pt', margin: '2px 0', fontWeight: '900', borderTop: '1px dashed black', borderBottom: '1px dashed black', padding: '2px 0' }}>REIMPRESIÓN</p>}
+                {ticketReciente.esReimpresion && <p style={{ fontSize: '10pt', margin: '2px 0', fontWeight: '900', borderTop: '1px dashed black', borderBottom: '1px dashed black', padding: '2px 0' }}>{ticketReciente.historico ? 'COPIA HISTÓRICA · PAGO SIN VALIDAR' : 'REIMPRESIÓN'}</p>}
                 <p style={{ fontSize: '9pt', margin: 0, padding: '2px', backgroundColor: 'black', color: 'white' }}>{copia === 1 ? 'ORIGINAL - CLIENTE' : 'COPIA - ORGANIZADOR'}</p>
                 <p style={{ marginTop: '5px' }}>==========================</p>
               </div>
@@ -616,7 +625,7 @@ export default function TabListaAtletas({ atletas, clubes, recargarDatos }: any)
 
               <p>==========================</p>
               <p><strong>Paquete:</strong> {ticketReciente.paquete_comprado}</p>
-              <p style={{ fontSize: '12pt', fontWeight: '900' }}>PAGO TOTAL: ${ticketReciente.monto_total} MXN</p>
+              <p style={{ fontSize: '12pt', fontWeight: '900' }}>{ticketReciente.historico ? 'IMPORTE REGISTRADO:' : 'PAGO TOTAL:'} ${ticketReciente.monto_total} MXN</p>
               
               <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
                 <QRCode value={ticketReciente.folios} size={90} style={{ height: "auto", maxWidth: "25mm", width: "25mm" }} />

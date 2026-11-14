@@ -125,33 +125,31 @@ export default function DashboardPDV() {
   const [activeTab, setActiveTab] = useState('caja'); 
   const [atletas, setAtletas] = useState<any[]>([]);
   const [eventos, setEventos] = useState<any[]>([]);
-  const [inscripciones, setInscripciones] = useState<any[]>([]); 
   const [clubes, setClubes] = useState<any[]>([]); 
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) {
-        obtenerRol(session.user.id);
-        cargarDatos();
-      } else {
-        setLoadingAuth(false);
-      }
-    });
-
+    let activeUser: string | undefined;
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) {
-        obtenerRol(session.user.id);
-        cargarDatos();
-      } else {
+      const userId = session?.user.id;
+      if (!userId) {
+        activeUser = undefined;
         setUserRole(null);
         setLoadingAuth(false);
+      } else if (userId !== activeUser) {
+        activeUser = userId;
+        setTimeout(() => {
+          if (activeUser !== userId) return;
+          void obtenerRol(userId);
+          void cargarDatos();
+        }, 0);
       }
     });
-
-    return () => subscription.unsubscribe();
+    return () => {
+      activeUser = undefined;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const obtenerRol = async (userId: string) => {
@@ -171,14 +169,14 @@ export default function DashboardPDV() {
 
   const cargarDatos = async () => {
     setCargando(true);
-    const { data: dataAtletas } = await supabase.from('atletas').select('*, perfiles(nombre_completo)').order('created_at', { ascending: false }).limit(50000);
-    const { data: dataEventos } = await supabase.from('eventos').select('*').order('fecha', { ascending: true }).limit(50000);
-    const { data: dataInscripciones } = await supabase.from('inscripciones').select('evento_id').limit(50000); 
-    const { data: dataClubes } = await supabase.from('clubes').select('*').order('nombre', { ascending: true }).limit(5000); 
+    const [{ data: dataAtletas }, { data: dataEventos }, { data: dataClubes }] = await Promise.all([
+      supabase.from('atletas').select('*, perfiles(nombre_completo)').order('created_at', { ascending: false }).limit(50000),
+      supabase.from('eventos').select('*').order('fecha', { ascending: true }).limit(50000),
+      supabase.from('clubes').select('*').order('nombre', { ascending: true }).limit(5000),
+    ]);
 
     setAtletas(dataAtletas || []);
     setEventos(dataEventos || []); 
-    setInscripciones(dataInscripciones || []);
     setClubes(dataClubes || []);
     setCargando(false);
   };
@@ -352,7 +350,7 @@ export default function DashboardPDV() {
       {/* ÁREA DE TRABAJO */}
       <div className="flex-grow w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-0">
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-          {activeTab === 'caja' && <TabCaja atletas={atletas} eventos={eventos.filter((e: any) => e.fecha >= new Date().toISOString().split('T')[0])} inscripciones={inscripciones} recargarDatos={cargarDatos} userRole={userRole} userId={session?.user?.id} />}
+          {activeTab === 'caja' && <TabCaja atletas={atletas} eventos={eventos.filter((e: any) => e.fecha >= new Date().toISOString().split('T')[0])} recargarDatos={cargarDatos} userRole={userRole} userId={session?.user?.id} />}
           {activeTab === 'atletas' && <TabAtletas recargarDatos={cargarDatos} clubes={clubes} userId={session?.user?.id} />}
           {activeTab === 'lista_atletas' && userRole === 'Administrador' && <TabListaAtletas atletas={atletas} clubes={clubes} recargarDatos={cargarDatos} />}
           {activeTab === 'clubes' && userRole === 'Administrador' && <TabClubes recargarDatos={cargarDatos} clubes={clubes} atletas={atletas} />}

@@ -33,9 +33,37 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+  payment-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: actv_payment_staging
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d actv_payment_staging"
+          --health-interval=5s --health-timeout=3s --health-retries=12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.6
+      - run: npm ci
+      - run: npm run test:payments:staging
+      - run: deno test --allow-env --config supabase/functions/deno.json supabase/functions/_shared/payments_test.ts
+      - run: deno run --allow-env --allow-net=127.0.0.1:55432 --config supabase/functions/deno.json --no-check tests/staging-edge.ts
+
   deploy:
     if: github.event_name == 'workflow_dispatch' && inputs.deploy_production && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, payment-staging]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:

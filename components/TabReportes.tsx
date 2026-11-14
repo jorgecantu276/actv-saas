@@ -4,7 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import QRCode from 'react-qr-code';
-import { Search, Download, UserCheck, ArrowUpDown, Edit, Trash2, X, Save, FileSpreadsheet, ShieldAlert, Printer, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, ChevronDown, History, Calendar } from 'lucide-react'; 
+import { Search, Download, UserCheck, ArrowUpDown, X, FileSpreadsheet, ShieldAlert, Printer, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, History, Calendar } from 'lucide-react';
+import ConciliacionCobros from './ConciliacionCobros';
+import { consultarPago, describePago, puedeReimprimir } from '../lib/eligibilidadFolio';
 
 // ✅ FUNCIÓN: Capitaliza la primera letra de cada palabra
 const capitalizarNombres = (texto: string | null | undefined) => {
@@ -56,7 +58,6 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
   useEffect(() => { setIsMounted(true); }, []);
 
   const [inscripciones, setInscripciones] = useState<any[]>([]);
-  const [atletasDB, setAtletasDB] = useState<any[]>([]);
   
   const [filtroEvento, setFiltroEvento] = useState('');
   const [busqueda, setBusqueda] = useState('');
@@ -75,16 +76,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
     setPaginaActual(1);
   }, [busqueda, filtroEvento, orden]);
 
-  const [editando, setEditando] = useState<any | null>(null);
-  const [formEdit, setFormEdit] = useState({ folio_asignado: '', paquete_comprado: '', monto_pagado: '', atleta_id: '' });
-  const [guardando, setGuardando] = useState(false);
-
   const [ticketReciente, setTicketReciente] = useState<any | null>(null);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importEventoId, setImportEventoId] = useState('');
-  const [importing, setImporting] = useState(false);
-  const [importStatus, setImportStatus] = useState('');
 
   useEffect(() => {
     cargarDatosSeguros();
@@ -121,9 +113,6 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
 
     const { data } = await query;
     if (data) setInscripciones(data);
-
-    const { data: dataAtletas } = await supabase.from('atletas').select('id, nombre, apellido, telefono').order('nombre', { ascending: true }).limit(50000);
-    if (dataAtletas) setAtletasDB(dataAtletas);
 
     setCargando(false);
   };
@@ -250,151 +239,34 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  const eliminarInscripcion = async (id: string, folio: string) => {
-    if (window.confirm(`¿Estás seguro de ELIMINAR la inscripción con Folio ${folio}?`)) {
-      const { error } = await supabase.from('inscripciones').delete().eq('id', id);
-      if (!error) cargarDatosSeguros();
+  const reimprimirTicket = async (inscripcion: any) => {
+    const pago = await consultarPago(inscripcion.id).catch(() => null);
+    if (!pago || !puedeReimprimir(pago)) {
+      alert('Este folio no tiene un pago vigente verificable. Consulta conciliación.');
+      return;
     }
-  };
-
-  const abrirModalEdicion = (inscripcion: any) => {
-    setEditando(inscripcion);
-    setFormEdit({ 
-      folio_asignado: inscripcion.folio_asignado || '', 
-      paquete_comprado: inscripcion.paquete_comprado || '', 
-      monto_pagado: inscripcion.monto_pagado || '',
-      atleta_id: inscripcion.atleta_id || '' 
-    });
-  };
-
-  const guardarEdicion = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setGuardando(true);
-    
-    const { error } = await supabase.from('inscripciones')
-      .update({
-        folio_asignado: formEdit.folio_asignado,
-        paquete_comprado: formEdit.paquete_comprado,
-        monto_pagado: formEdit.monto_pagado,
-        atleta_id: formEdit.atleta_id 
-      })
-      .eq('id', editando.id);
-      
-    if (!error) { 
-      setEditando(null); 
-      cargarDatosSeguros(); 
-    } else {
-      alert("Hubo un error al guardar los cambios: " + error.message);
-    }
-    setGuardando(false);
-  };
-
-  const reimprimirTicket = (inscripcion: any) => {
     setTicketReciente({
       id_db: inscripcion.id,
       fecha_hora: inscripcion.created_at,
       evento_nombre: inscripcion.eventos?.nombre_carrera,
       evento_fecha: inscripcion.eventos?.fecha,
       paquete_comprado: inscripcion.paquete_comprado,
-      monto_total: inscripcion.monto_pagado,
+      monto_total: pago.monto_pagado,
       folios: inscripcion.folio_asignado,
       folios_array: [inscripcion.folio_asignado],
       corredores: `${capitalizarNombres(inscripcion.atletas?.nombre)} ${capitalizarNombres(inscripcion.atletas?.apellido)}`,
       atletas_data: [inscripcion.atletas],
       cajero: inscripcion.perfiles?.nombre_completo || 'Usuario', 
+      historico: pago.actv_eligible !== true,
       esReimpresion: true 
     });
   };
 
   const enviarTicketWA = () => {
     if (!ticketReciente) return;
-    const msj = `¡Inscripción Confirmada! 🎉\n\nCarrera: ${ticketReciente.evento_nombre}\nCorredor(es): ${ticketReciente.corredores}\nFolio(s): ${ticketReciente.folios}\nTotal: $${ticketReciente.monto_total} MXN\n\n¡Nos vemos en la meta con ACTV!`;
+    const title = ticketReciente.historico ? 'Copia histórica de inscripción · pago sin validar en ACTV' : '¡Inscripción confirmada!';
+    const msj = `${title}\n\nCarrera: ${ticketReciente.evento_nombre}\nCorredor(es): ${ticketReciente.corredores}\nFolio(s): ${ticketReciente.folios}\nImporte registrado: $${ticketReciente.monto_total} MXN`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msj)}`, '_blank');
-  };
-
-  const handleImportCSV = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!importFile || !importEventoId) return alert("Por favor selecciona el archivo CSV y la carrera destino.");
-    
-    setImporting(true);
-    setImportStatus("Iniciando lectura de archivo...");
-
-    const reader = new FileReader();
-    reader.onload = async (event: any) => {
-      const text = event.target.result;
-      const lines = text.split('\n');
-      
-      let successCount = 0;
-      let skipCount = 0;
-
-      for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
-        
-        const cols = lines[i].split(',').map((c: string) => c.trim().replace(/^"|"$/g, ''));
-        
-        if (cols.length < 8) continue;
-
-        const [folio, nombre, apellido, fecha_nacimiento, genero, telefono, club, talla, paquete] = cols;
-        
-        setImportStatus(`Procesando a ${nombre} ${apellido}...`);
-
-        try {
-          let atletaId = null;
-          const { data: existingAtletas } = await supabase.from('atletas')
-            .select('id')
-            .ilike('nombre', nombre)
-            .ilike('apellido', apellido)
-            .limit(1);
-
-          if (existingAtletas && existingAtletas.length > 0) {
-            atletaId = existingAtletas[0].id;
-          } else {
-            const { data: newAtleta } = await supabase.from('atletas').insert([{
-              nombre, 
-              apellido, 
-              fecha_nacimiento: fecha_nacimiento || null, 
-              genero: genero || 'N/A', 
-              telefono: telefono || 'N/A', 
-              club: club || 'Libre', 
-              talla_playera: talla || 'N/A'
-            }]).select();
-            if (newAtleta) atletaId = newAtleta[0].id;
-          }
-
-          if (atletaId) {
-            const { data: existingInsc } = await supabase.from('inscripciones')
-              .select('id')
-              .eq('evento_id', importEventoId)
-              .eq('folio_asignado', folio)
-              .limit(1);
-            
-            if (existingInsc && existingInsc.length > 0) {
-              skipCount++; 
-            } else {
-              await supabase.from('inscripciones').insert([{
-                atleta_id: atletaId,
-                evento_id: importEventoId,
-                folio_asignado: folio,
-                paquete_comprado: paquete || 'Kit Básico',
-                monto_pagado: 'WP / Online',
-                user_id: userId
-              }]);
-              successCount++;
-            }
-          }
-        } catch (err) {
-          console.log("Fila omitida por error de formato: ", lines[i]);
-        }
-      }
-      
-      setImporting(false);
-      setImportFile(null);
-      setShowImportModal(false);
-      alert(`✅ Importación Finalizada:\n\n- ${successCount} folios importados con éxito.\n- ${skipCount} folios omitidos (ya existían).`);
-      cargarDatosSeguros(); 
-    };
-    
-    reader.readAsText(importFile);
   };
 
   const eventosDropdown = userRole === 'Moderador' 
@@ -424,6 +296,8 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
         }
       `}</style>
 
+      {userRole === 'Administrador' && <ConciliacionCobros canMatch />}
+
       {/* CABECERA ENTERPRISE */}
       <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm ring-1 ring-slate-200 no-print">
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
@@ -435,12 +309,6 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
           </div>
           
           <div className="flex flex-wrap gap-3 w-full xl:w-auto">
-            {userRole === 'Administrador' && (
-              <button onClick={() => setShowImportModal(true)} className="flex-1 md:flex-none text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2.5 rounded-xl transition-all flex items-center justify-center shadow-sm mr-0 md:mr-2">
-                <UploadCloud className="w-4 h-4 mr-2 text-blue-500" /> Importar de WP
-              </button>
-            )}
-            
             {(userRole === 'Administrador' || userRole === 'Moderador') && (
               <>
                 <button onClick={exportarCSV} className="flex-1 md:flex-none text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2.5 rounded-xl transition-all flex items-center justify-center shadow-sm">
@@ -564,7 +432,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-slate-700 font-medium block line-clamp-1">{i.paquete_comprado}</span>
-                        <span className="text-[10px] text-green-600 font-black mt-1 block">{i.monto_pagado !== 'WP / Online' ? `$${i.monto_pagado} MXN` : 'Pagado Online'}</span>
+                        <span className="text-[10px] text-slate-600 font-black mt-1 block">{describePago(i)}</span>
                       </td>
                       
                       <td className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase">
@@ -573,14 +441,8 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                       
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => reimprimirTicket(i)} className="p-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300 transition-all shadow-sm" title="Reimprimir">
+                          <button disabled={!puedeReimprimir(i)} onClick={() => reimprimirTicket(i)} className="p-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300 transition-all shadow-sm disabled:opacity-40" title="Reimprimir">
                             <Printer className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => abrirModalEdicion(i)} className="p-2 bg-white border border-slate-200 text-blue-600 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm" title="Editar">
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => eliminarInscripcion(i.id, i.folio_asignado)} className="p-2 bg-white border border-slate-200 text-red-500 rounded-xl hover:bg-red-50 hover:border-red-200 transition-all shadow-sm" title="Eliminar">
-                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -689,9 +551,10 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                   <div className="flex justify-between items-end text-xs mt-auto pt-3 border-t border-slate-200">
                     <div>
                       <span className="text-slate-600 font-medium block">{insc.paquete_comprado}</span>
-                      <span className="font-bold text-green-600 mt-0.5 block">{insc.monto_pagado !== 'WP / Online' ? `$${insc.monto_pagado} MXN` : 'Pagado Online'}</span>
+                      <span className="font-bold text-slate-600 mt-0.5 block">{describePago(insc)}</span>
                     </div>
                     <button 
+                      disabled={!puedeReimprimir(insc)}
                       onClick={() => reimprimirTicket(insc)} 
                       className="flex items-center bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors font-bold shadow-sm active:scale-95"
                     >
@@ -707,116 +570,6 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
         document.body
       )}
 
-      {/* MODAL DE IMPORTACIÓN WP */}
-      {isMounted && showImportModal && createPortal(
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 no-print overflow-y-auto">
-           <div className="bg-white rounded-[32px] p-8 md:p-10 max-w-lg w-full shadow-2xl relative animate-in zoom-in-95 duration-200 my-auto">
-            <button type="button" onClick={() => setShowImportModal(false)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-full p-2 transition-all"><X size={20}/></button>
-            
-            <div className="mb-8">
-              <div className="bg-blue-50 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 border border-blue-100">
-                <UploadCloud className="w-6 h-6 text-blue-600"/>
-              </div>
-              <h3 className="text-xl font-black text-slate-900 tracking-tight leading-none">Importar de WordPress</h3>
-              <p className="text-xs font-medium text-slate-500 mt-2">Sube un archivo CSV para inyectar folios externos al sistema.</p>
-            </div>
-            
-            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 mb-6 shadow-inner">
-              <p className="text-[10px] font-black uppercase text-slate-500 mb-2 tracking-widest">Estructura Estricta (9 Columnas)</p>
-              <p className="text-xs text-slate-800 font-mono font-medium leading-relaxed">Folio, Nombre, Apellido, Fecha_Nacimiento, Genero, Telefono, Club, Talla, Paquete</p>
-            </div>
-
-            <form onSubmit={handleImportCSV} className="space-y-5">
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">1. Selecciona la Carrera Destino *</label>
-                <div className="relative">
-                  <select required value={importEventoId} onChange={(e) => setImportEventoId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none text-slate-900 font-bold appearance-none cursor-pointer focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all">
-                    <option value="">Seleccionar carrera...</option>
-                    {eventosDropdown.map((ev: any) => <option key={ev.id} value={ev.id}>{ev.nombre_carrera}</option>)}
-                  </select>
-                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1 mt-2">2. Sube el Archivo CSV *</label>
-                <input required type="file" accept=".csv" onChange={(e) => setImportFile(e.target.files ? e.target.files[0] : null)} className="w-full bg-slate-50 border border-dashed border-slate-300 p-3.5 rounded-xl outline-none text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer transition-all" />
-              </div>
-              
-              <button type="submit" disabled={importing || !importFile || !importEventoId} className="w-full bg-slate-900 hover:bg-black text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-slate-900/10 text-sm flex justify-center items-center mt-6 transition-all active:scale-[0.98] disabled:opacity-50">
-                {importing ? 'Procesando...' : <><Save className="w-4 h-4 mr-2" /> Iniciar Importación</>}
-              </button>
-              
-              {importing && (
-                <p className="text-center text-xs font-bold text-blue-600 mt-4 animate-pulse">{importStatus}</p>
-              )}
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* MODAL EDICIÓN DE FOLIO/PAQUETE/REASIGNACIÓN DE ATLETA */}
-      {isMounted && editando && userRole === 'Administrador' && createPortal(
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[99999] p-4 sm:p-6 no-print overflow-y-auto">
-           <div className="bg-white rounded-[32px] p-6 sm:p-8 md:p-10 max-w-md w-full shadow-2xl relative animate-in zoom-in-95 duration-200 my-auto max-h-[90vh] overflow-y-auto custom-scrollbar">
-            
-            <button type="button" onClick={() => setEditando(null)} className="absolute top-5 right-5 sm:top-6 sm:right-6 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-full p-2 transition-all z-20"><X size={20}/></button>
-            
-            <div className="mb-6 sm:mb-8 pr-8">
-              <div className="bg-slate-100 w-12 h-12 rounded-2xl flex items-center justify-center mb-4">
-                <Edit className="w-6 h-6 text-slate-900"/>
-              </div>
-              <h3 className="text-xl font-black text-slate-900 tracking-tight leading-none">Editar Registro</h3>
-              <p className="text-xs font-medium text-slate-500 mt-2">Ajuste manual y reasignación de folios.</p>
-            </div>
-            
-            <form onSubmit={guardarEdicion} className="space-y-4">
-              
-              <div className="space-y-1.5 sm:col-span-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Corredor Asignado (Reasignar Folio)</label>
-                <div className="relative">
-                  <select 
-                    required 
-                    value={formEdit.atleta_id} 
-                    onChange={(e) => setFormEdit({...formEdit, atleta_id: e.target.value})} 
-                    className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none text-slate-900 font-bold focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-sm appearance-none pr-8 cursor-pointer"
-                  >
-                    <option value="" disabled>Selecciona un atleta...</option>
-                    {atletasDB.map(a => (
-                      <option key={a.id} value={a.id}>{capitalizarNombres(a.nombre)} {capitalizarNombres(a.apellido)} - Tel: {a.telefono}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                </div>
-                <p className="text-[9px] text-slate-400 mt-1 pl-1 leading-tight">Si necesitas corregir un error ortográfico en el nombre del corredor, por favor hazlo desde la pestaña de <b>Padrón Global</b>.</p>
-              </div>
-
-              <div className="space-y-1.5 pt-2 border-t border-slate-100 mt-4">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Folio Asignado</label>
-                <input required value={formEdit.folio_asignado} onChange={(e) => setFormEdit({...formEdit, folio_asignado: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none font-black text-red-600 focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-lg" />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Paquete Adquirido</label>
-                  <input required value={formEdit.paquete_comprado} onChange={(e) => setFormEdit({...formEdit, paquete_comprado: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none text-slate-900 font-bold focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-sm" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Monto Pagado</label>
-                  <input required value={formEdit.monto_pagado} onChange={(e) => setFormEdit({...formEdit, monto_pagado: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none text-slate-900 font-bold focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-sm" />
-                </div>
-              </div>
-
-              <button type="submit" disabled={guardando} className="w-full bg-slate-900 hover:bg-black text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-slate-900/10 text-sm flex justify-center items-center mt-6 transition-all active:scale-[0.98] disabled:opacity-50">
-                {guardando ? 'Guardando...' : <><Save className="w-4 h-4 mr-2" /> Guardar Cambios</>}
-              </button>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
-
       {/* ✅ POPUP IMPRESIÓN REPORTE (z-index ajustado a 999999 para sobreponerse al historial) */}
       {isMounted && ticketReciente && createPortal(
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[999999] p-4 no-print overflow-y-auto">
@@ -824,7 +577,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
             <button type="button" onClick={() => setTicketReciente(null)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full transition-all"><X size={16} /></button>
             
             <h3 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">ACTV</h3>
-            <p className="text-[10px] text-slate-400 border-b border-slate-200 pb-4 mb-5 uppercase font-bold tracking-widest">Reimpresión de Ticket</p>
+            <p className="text-[10px] text-slate-400 border-b border-slate-200 pb-4 mb-5 uppercase font-bold tracking-widest">{ticketReciente.historico ? 'Copia histórica · pago sin validar' : 'Reimpresión de ticket'}</p>
             
             <div className="text-left text-sm space-y-3 mb-6 text-slate-700">
               <p><strong className="text-slate-900">Evento:</strong> {ticketReciente.evento_nombre}</p>
@@ -901,7 +654,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
               <div style={{ textAlign: 'center', marginBottom: '5px' }}>
                 <img src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png" alt="logo actv" style={{ width: '30mm', height: 'auto', margin: '0 auto 5px auto', display: 'block', filter: 'grayscale(100%) contrast(1.5)' }} />
                 <h2 style={{ fontSize: '15pt', margin: 0, fontWeight: '900' }}>ACTV SaaS</h2>
-                {ticketReciente.esReimpresion && <p style={{ fontSize: '10pt', margin: '2px 0', fontWeight: '900', borderTop: '1px dashed black', borderBottom: '1px dashed black', padding: '2px 0' }}>REIMPRESIÓN</p>}
+                {ticketReciente.esReimpresion && <p style={{ fontSize: '10pt', margin: '2px 0', fontWeight: '900', borderTop: '1px dashed black', borderBottom: '1px dashed black', padding: '2px 0' }}>{ticketReciente.historico ? 'COPIA HISTÓRICA · PAGO SIN VALIDAR' : 'REIMPRESIÓN'}</p>}
                 <p style={{ fontSize: '9pt', margin: 0, padding: '2px', backgroundColor: 'black', color: 'white' }}>{copia === 1 ? 'ORIGINAL - CLIENTE' : 'COPIA - ORGANIZADOR'}</p>
                 <p style={{ marginTop: '5px' }}>==========================</p>
               </div>
@@ -926,7 +679,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
 
               <p>==========================</p>
               <p><strong>Paquete:</strong> {ticketReciente.paquete_comprado}</p>
-              <p style={{ fontSize: '12pt', fontWeight: '900' }}>PAGO TOTAL: ${ticketReciente.monto_total} MXN</p>
+              <p style={{ fontSize: '12pt', fontWeight: '900' }}>{ticketReciente.historico ? 'IMPORTE REGISTRADO:' : 'PAGO TOTAL:'} ${ticketReciente.monto_total} MXN</p>
               
               <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
                 <QRCode value={ticketReciente.folios} size={90} style={{ height: "auto", maxWidth: "25mm", width: "25mm" }} />
