@@ -44,6 +44,7 @@ export async function seedLegacyState(context) {
   const manager = await identity(admin, 'retained-manager', false, 'Administrador');
   const legacyStaff = await identity(admin, 'retained-staff');
   const athlete = randomUUID(), race = randomUUID(), otherRace = randomUUID(), registration = randomUUID();
+  const evidenceAthlete = randomUUID(), evidenceRegistration = randomUUID(), evidenceReferenceRegistration = randomUUID();
   await db.query(`insert into public.eventos(id,nombre_carrera,fecha,organizador,distancia,precio_1,cupo_maximo)
     values($1,'Synthetic retained race',current_date+7,'ACTV','5K',500,10),
           ($2,'Synthetic other race',current_date+7,'ACTV','10K',500,10)`, [race, otherRace]);
@@ -51,6 +52,13 @@ export async function seedLegacyState(context) {
     values($1,'Synthetic','Retained','8685550100','8685550101','M',$2)`, [athlete, legacyStaff.id]);
   await db.query(`insert into public.inscripciones(id,atleta_id,evento_id,folio_asignado,monto_pagado,metodo_pago,usuario_id)
     values($1,$2,$3,'00042',700,'efectivo',$4)`, [registration, athlete, race, legacyStaff.id]);
+  // Retained unknown-payment registration used by the handover contract. Seed it
+  // before the paid-folio guard is installed; never bypass that guard afterwards.
+  await db.query(`insert into public.atletas(id,nombre,apellido,telefono,telefono_emergencia,talla_playera)
+    values($1,'Synthetic','Evidence legacy','8685550100','8685550101','M')`, [evidenceAthlete]);
+  await db.query(`insert into public.inscripciones(id,atleta_id,evento_id,folio_asignado,monto_pagado,metodo_pago)
+    values($1,$2,$3,'EVIDENCE-SYNTHETIC',500,'efectivo'),
+          ($4,$2,$3,'EVIDENCE-REFERENCE',500,'efectivo')`, [evidenceRegistration, evidenceAthlete, race, evidenceReferenceRegistration]);
   const objectPath = 'synthetic-staging-' + randomUUID() + '.txt';
   const objectBytes = Buffer.from('ACTV synthetic retained kit evidence. No participant data.');
   const uploaded = await admin.storage.from('evidencias_kits').upload(objectPath, objectBytes, { contentType: 'text/plain' });
@@ -64,7 +72,7 @@ export async function seedLegacyState(context) {
   const club = (await db.query("insert into public.clubes(nombre) values('Synthetic retained club') returning id")).rows[0].id;
   const snapshot = (await db.query(`select id,atleta_id,evento_id,folio_asignado,monto_pagado,metodo_pago,usuario_id,foto_evidencia
     from public.inscripciones where id=$1`, [registration])).rows[0];
-  return { manager, legacyStaff, race, otherRace, athlete, registration, client, service, quote, club, snapshot, objectPath, objectBytes };
+  return { manager, legacyStaff, race, otherRace, athlete, registration, evidenceRegistration, evidenceReferenceRegistration, client, service, quote, club, snapshot, objectPath, objectBytes };
 }
 
 export async function verifyStaffLifecycle(context, retained) {

@@ -1,4 +1,5 @@
 import { body, handler, HttpError, operator, uuid } from '../_shared/http.ts';
+import { authorizeProviderAttempt } from '../_shared/sales-gate.ts';
 import {
   createOrder,
   getOrder,
@@ -78,6 +79,7 @@ export const terminalHandler = handler('actv-stripe-terminal', async (request) =
         return { ...orderResult(order), provider_status: providerStatus, readerStatus };
       }
       const attempt = action === 'retry' ? uuid(input.idempotencyKey) : 'initial';
+      await authorizeProviderAttempt(order.order_id, 'terminal_reader', attempt);
       const active = await stripe.terminal.readers.processPaymentIntent(readerId, {
         payment_intent: paymentId,
         process_config: { enable_customer_cancellation: true },

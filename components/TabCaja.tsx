@@ -1,29 +1,17 @@
 'use client';
 
 
-import { useClientReady } from '../lib/use-client-ready';
-import type { Athlete, RaceEvent, Receipt, StaffProfile, StaffScreenProps } from '../lib/legacy-types';
-import React, { useState, useEffect, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import type { Athlete, RaceEvent, StaffProfile, StaffScreenProps } from '../lib/legacy-types';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import QRCode from 'react-qr-code';
-import { Search, PlusCircle, X, Ticket, UserPlus, Printer, MessageCircle, Calendar, Store, Users, Map as MapIcon, Flag, ChevronDown } from 'lucide-react';
+import SaleReceipt from './SaleReceipt';
+import { loadSaleReceipt, type SaleReceipt as SaleReceiptData } from '../lib/sale-receipt';
+import { Search, PlusCircle, X, Ticket, UserPlus, Printer, Calendar, Store, Users, Map as MapIcon, Flag, ChevronDown } from 'lucide-react';
 import CajaCobros, { type Cart, type StaffOrder } from './CajaCobros';
 
-const calcularEdadAlEvento = (fechaNacimiento: string | undefined, fechaEvento: string | undefined) => {
-  if (!fechaNacimiento || !fechaEvento) return 'No definida';
-  const nac = new Date(fechaNacimiento);
-  const ev = new Date(fechaEvento);
-  let edad = ev.getFullYear() - nac.getFullYear();
-  const m = ev.getMonth() - nac.getMonth();
-  if (m < 0 || (m === 0 && ev.getDate() < nac.getDate())) {
-    edad--;
-  }
-  return isNaN(edad) ? 'No definida' : `${edad} años`;
-};
+
 
 export default function TabCaja({ atletas, eventos, recargarDatos, userRole, userId }: Omit<StaffScreenProps, 'clubes'>) {
-  const isMounted = useClientReady();
 
   const [enviando, setEnviando] = useState(false);
   const [atletasSeleccionados, setAtletasSeleccionados] = useState<Athlete[]>([]);
@@ -34,7 +22,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
   const [busquedaAtleta, setBusquedaAtleta] = useState('');
   const [mostrarDropdown, setMostrarDropdown] = useState(false);
   const [showQuickRegister, setShowQuickRegister] = useState(false);
-  const [ticketReciente, setTicketReciente] = useState<Receipt | null>(null);
+  const [ticketReciente, setTicketReciente] = useState<SaleReceiptData | null>(null);
 
   const [cobroEnCurso, setCobroEnCurso] = useState(false);
 
@@ -45,7 +33,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
   const [rolReal, setRolReal] = useState(userRole || '');
   const [misEventosPermitidos, setMisEventosPermitidos] = useState<string[]>([]);
   const [clubesDB, setClubesDB] = useState<string[]>([]);
-  const [nombreCajero, setNombreCajero] = useState('');
+  const [receiptReprint, setReceiptReprint] = useState(false);
 
   const [aceptoTerminos, setAceptoTerminos] = useState(false);
 
@@ -68,12 +56,6 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
         if (perfilData && !errPerfil) {
           const dbRol = String(perfilData.rol || '').toLowerCase();
           setRolReal(perfilData.rol || userRole || '');
-
-          if (perfilData.nombre_completo) {
-            setNombreCajero(perfilData.nombre_completo);
-          } else {
-            setNombreCajero(perfilData.rol || userRole || '');
-          }
 
           if (dbRol.includes('admin') || dbRol.includes('pdv')) {
             setVerTodosEventos(true);
@@ -134,59 +116,18 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
     setMostrarDropdown(false);
   };
 
-  const enviarTicketWA = () => {
-    if (!ticketReciente) return;
-    const telefonoOriginal = ticketReciente.atletas_data[0]?.telefono || '';
-    const telefonoLimpio = telefonoOriginal.replace(/\D/g, '');
-    // ✅ USA EL CAJERO ORIGINAL EN EL MENSAJE SI EXISTE
-    const title = ticketReciente.historico ? 'Copia histórica de inscripción · pago sin validar en ACTV' : '¡Inscripción confirmada!';
-    const msj = `${title}\n\nCarrera: ${ticketReciente.evento_nombre}\nCorredor(es): ${ticketReciente.corredores}\nFolio(s): ${ticketReciente.folios}\nImporte registrado: $${ticketReciente.monto_total} MXN\n\nAtendido por: ${ticketReciente.cajero_original || nombreCajero}\nVisítanos en: actv.mx`;
-    window.open(`https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(msj)}`, '_blank');
-  };
+
 
   const handleReimprimir = async () => {
-    let query = supabase.from('inscripciones').select('*, atletas(*), eventos(*)');
-    if (idReimpresion.trim() !== '') {
-      if (!eventoSeleccionado) {
-        alert("⚠️ Por favor, selecciona una carrera en la lista de abajo antes de buscar el folio.");
-        return;
-      }
-      const folioFormateado = idReimpresion.trim().toUpperCase();
-      query = query.eq('folio_asignado', folioFormateado).eq('evento_id', eventoSeleccionado.id).limit(1);
-    } else {
-      query = query.order('created_at', { ascending: false }).limit(1);
+    if (!eventoSeleccionado || !idReimpresion.trim()) {
+      alert('Selecciona la carrera y escribe el folio original.');
+      return;
     }
-
-    const { data, error } = await query.maybeSingle();
-    if (error || !data) {
-      alert("No se encontró ningún recibo con ese Folio en la carrera seleccionada.");
-    } else if (data.actv_eligible === false || data.monto_pagado === 'WP / Online') {
-      alert('Este folio no tiene un pago vigente verificado. Consulta conciliación antes de reimprimir.');
-    } else {
-      // ✅ RESCATE DEL CAJERO ORIGINAL DE FORMA SEGURA
-      let cajeroOrig = null;
-      if (data.usuario_id) {
-        const { data: pData } = await supabase.from('perfiles').select('nombre_completo, rol').eq('id', data.usuario_id).maybeSingle();
-        if (pData) cajeroOrig = pData.nombre_completo || pData.rol;
-      }
-
-      setTicketReciente({
-        id_db: data.id,
-        fecha_hora: data.created_at || new Date().toISOString(),
-        evento_nombre: data.eventos.nombre_carrera,
-        evento_fecha: data.eventos.fecha,
-        paquete_comprado: data.paquete_comprado,
-        monto_total: data.monto_pagado,
-        folios: data.folio_assigned || data.folio_asignado,
-        folios_array: [data.folio_assigned || data.folio_asignado],
-        corredores: `${data.atletas.nombre} ${data.atletas.apellido}`,
-        atletas_data: [data.atletas],
-        cajero_original: cajeroOrig, // Guardamos el nombre recuperado
-        historico: data.actv_eligible !== true,
-        esReimpresion: true
-      });
-      setTimeout(() => window.print(), 500);
-    }
+    try {
+      const receipt = await loadSaleReceipt({ p_event_id: eventoSeleccionado.id, p_folio: idReimpresion.trim() });
+      setReceiptReprint(true);
+      setTicketReciente(receipt);
+    } catch (error) { alert(error instanceof Error ? error.message : 'Recibo no disponible.'); }
   };
 
   const handleSubmitQuickAtleta = async (e: React.FormEvent) => {
@@ -258,34 +199,11 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
   const totalEstimado = eventoSeleccionado ? carrito?.items.reduce((total, item) =>
     total + Math.round(Number(item.package === 2 ? eventoSeleccionado.precio_2 : eventoSeleccionado.precio_1) * 100),
   0) ?? 0 : 0;
-  const atletasPorId = useMemo(() => new Map((atletas || []).map((atleta: { id: string }) => [atleta.id, atleta])), [atletas]);
-
-  const mostrarRecibo = (order: StaffOrder, cart: Cart, method: 'cash' | 'terminal') => {
-    const records = order.registrations ?? [];
-    if (order.state !== 'issued' || !records.length) return;
-    const evento = eventosSeguros.find((event: { id: string }) => event.id === cart.eventId);
-    const participantes = records.map((record, index) =>
-      (atletasPorId.get(record.atleta_id ?? cart.items[index]?.athlete_id) ?? { nombre: 'Corredor', apellido: '' }) as {
-        nombre: string;
-        apellido: string;
-      },
-    );
-    const folios = records.map(record => record.folio_asignado);
-    setTicketReciente({
-      id_db: records[0].id,
-      order_id: order.order_id,
-      fecha_hora: records[0].created_at,
-      evento_nombre: evento?.nombre_carrera ?? 'Carrera ACTV',
-      evento_fecha: evento?.fecha,
-      paquete_comprado: cart.relay ? 'Modalidad Relevos / Equipo' : [...new Set(records.map(row => row.paquete_comprado))].join(' + '),
-      metodo_pago: method === 'cash' ? 'Efectivo' : 'Tarjeta',
-      monto_total: (order.amount / 100).toFixed(2),
-      folios: folios.join(', '),
-      folios_array: folios,
-      corredores: participantes.map(atleta => `${atleta.nombre} ${atleta.apellido}`.trim()).join(', '),
-      atletas_data: participantes,
-      esReimpresion: false,
-    });
+  const mostrarRecibo = async (order: StaffOrder) => {
+    if (order.state !== 'issued') return;
+    const receipt = await loadSaleReceipt({ p_order_id: order.order_id });
+    setReceiptReprint(false);
+    setTicketReciente(receipt);
     setAtletasSeleccionados([]);
     setEventoSeleccionado(null);
     setPaquetesAtletas({});
@@ -296,30 +214,13 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
   return (
     <section className="flex flex-col relative pb-16 animate-in fade-in slide-in-from-bottom-2 duration-500">
 
-      <style jsx global>{`
-        @media print {
-          @page { margin: 0; size: 58mm auto; }
-          html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
-          body > :not(.print-area, #ticket-58mm) { display: none !important; }
-          #ticket-58mm {
-            display: block !important;
-            width: 58mm;
-            padding: 2mm;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 10pt;
-            font-weight: 700;
-            line-height: 1.2;
-            color: black;
-          }
-          .print-area { display: none !important; }
-        }
-      `}</style>
+
 
       {/* MENÚ SUPERIOR TIPO WORDPRESS ADMIN */}
       <div className="bg-white border-b border-slate-200 px-5 py-3 flex flex-col md:flex-row justify-between items-center gap-4 shadow-sm rounded-t-2xl no-print z-10">
         <div className="flex items-center gap-4">
           <img
-            src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png"
+            src="/actv-wordmark.svg"
             alt="logo actv"
             className="h-9 w-auto object-contain transition-transform duration-300 hover:scale-105"
           />
@@ -629,144 +530,8 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
       )}
 
       {/* POPUP DE CONFIRMACIÓN DE VENTA NORMAL */}
-      {isMounted && ticketReciente && createPortal(
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 no-print">
-          <div className="bg-white p-8 max-w-sm w-full text-center relative font-sans shadow-2xl rounded-3xl border border-slate-100 animate-in zoom-in-95 duration-200">
-            <button type="button" onClick={() => setTicketReciente(null)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-900 bg-slate-100 p-1.5 rounded-full transition-colors"><X size={16} /></button>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-1">ACTV</h3>
-            <p className="text-[10px] text-slate-500 border-b border-slate-200 pb-4 mb-5 uppercase font-bold tracking-widest">{ticketReciente.historico ? 'Copia histórica · pago sin validar' : ticketReciente.esReimpresion ? 'Reimpresión de Ticket' : 'Pago confirmado · folios emitidos'}</p>
-            <div className="text-left text-sm space-y-3 mb-6 text-slate-700">
-              <p><strong className="text-slate-900">Evento:</strong> {ticketReciente.evento_nombre}</p>
-              <p><strong className="text-slate-900">Atletas:</strong> {ticketReciente.corredores}</p>
-              <div className="bg-slate-50 p-5 rounded-2xl text-center mt-5 border border-slate-100">
-                <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Folio(s) Asignados</p>
-                <p className="text-2xl font-black text-blue-600 tracking-tight">{ticketReciente.folios}</p>
-              </div>
-            </div>
-            <div className="space-y-2.5">
-              <button type="button" onClick={enviarTicketWA} className="w-full bg-slate-100 text-slate-700 hover:text-slate-900 hover:bg-slate-200 py-3 rounded-xl font-bold flex items-center justify-center transition-colors text-sm shadow-sm"><MessageCircle className="mr-2 w-4 h-4"/> Enviar por WhatsApp</button>
-              <button type="button" onClick={() => window.print()} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold flex items-center justify-center hover:bg-black transition-colors text-sm shadow-md active:scale-[0.98]"><Printer className="mr-2 w-4 h-4"/> Imprimir Recibo</button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      {ticketReciente && <SaleReceipt receipt={ticketReciente} reprint={receiptReprint} onClose={() => setTicketReciente(null)} />}
 
-      {/* RECIBO GRANDE (A4/CARTA) */}
-      {isMounted && ticketReciente && createPortal(
-        <div className="print-area hidden print:flex flex-col bg-white text-black font-sans w-full p-10">
-          <div className="flex justify-between items-center border-b-4 border-black pb-4 mb-8">
-            <img src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png" alt="logo actv" className="h-20 w-auto" />
-            <div className="text-right">
-                <h1 className="text-4xl font-black uppercase tracking-tighter">ACTV - {ticketReciente.esReimpresion ? 'Reimpresión' : 'Punto de Venta'}</h1>
-                <h2 className="text-2xl font-bold text-gray-700 mt-2 uppercase">{ticketReciente.evento_nombre} <br/><span className="text-lg text-gray-500 capitalize">Fecha del evento: {ticketReciente.evento_fecha ? new Date(ticketReciente.evento_fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }).replace(/ de /g, '-') : ''}</span></h2>
-            </div>
-          </div>
-          <div className="flex-grow space-y-6">
-            {ticketReciente.atletas_data.map((atleta, index: number) => (
-              <div key={index} className="border-2 border-slate-200 p-6 rounded-xl relative">
-                <div className="absolute top-4 right-6 text-right">
-                  <p className="text-[10px] font-black uppercase text-gray-400">Número de Folio</p>
-                  <p className="text-4xl font-black text-[#8A0303]">{ticketReciente.folios_array[index]}</p>
-                </div>
-                <div className="w-2/3 mb-4">
-                  <p className="text-[10px] font-black uppercase text-gray-400">Nombre del Atleta</p>
-                  <p className="text-2xl font-black uppercase leading-none text-slate-900">{atleta.nombre} {atleta.apellido}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-y-4 gap-x-2">
-                  <div><p className="text-[10px] font-black uppercase text-gray-400">Club</p><p className="text-sm font-bold uppercase">{atleta.club || 'Libre'}</p></div>
-                  <div><p className="text-[10px] font-black uppercase text-gray-400">Edad</p><p className="text-sm font-bold uppercase">{calcularEdadAlEvento(atleta.fecha_nacimiento, ticketReciente.evento_fecha)}</p></div>
-                  <div><p className="text-[10px] font-black uppercase text-gray-400">Teléfono</p><p className="text-sm font-bold uppercase">{atleta.telefono}</p></div>
-                  <div><p className="text-[10px] font-black uppercase text-gray-400">Emergencia</p><p className="text-sm font-bold uppercase">{atleta.telefono_emergencia}</p></div>
-                </div>
-              </div>
-            ))}
-            <div className="border-t-2 border-dashed border-gray-300 pt-6 flex justify-between items-center px-4">
-               <div><p className="text-lg font-bold uppercase">{ticketReciente.paquete_comprado}</p><p className="text-3xl font-black">${ticketReciente.monto_total} MXN</p></div>
-               <QRCode value={ticketReciente.folios} size={110} />
-            </div>
-          </div>
-          <div className="mt-auto pt-8 border-t-2 border-black flex justify-between items-end">
-              <div className="w-2/3">
-                  <p className="text-[10px] text-justify leading-tight text-gray-700">&quot;Yo, {ticketReciente.corredores}, declaro que participo voluntariamente, asumo los riesgos físicos y libero a ACTV y organizadores de toda responsabilidad por lesiones o incidentes derivados del evento. Autorizo el uso de mi imagen para fines publicitarios...&quot;</p>
-                  <div className="mt-16 border-t border-black w-64 pt-2 text-center text-[10px] font-bold">Firma de Conformidad</div>
-              </div>
-              <div className="text-right text-[10px] font-bold text-gray-700">
-                  {/* ✅ AQUÍ SE IMPRIME EL CAJERO ORIGINAL EN EL A4 */}
-                  <p>Cajero: {ticketReciente.cajero_original || nombreCajero}</p>
-                  <p>actv.mx</p>
-              </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* TICKET TÉRMICO 58MM DOBLE */}
-      {isMounted && ticketReciente && createPortal(
-        <div id="ticket-58mm" className="hidden print:block font-bold">
-          {[1, 2].map((copia) => (
-            <div key={copia} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-
-              <div style={{ textAlign: 'center', marginBottom: '5px' }}>
-                <img src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png" alt="logo actv" style={{ width: '30mm', height: 'auto', margin: '0 auto 5px auto', display: 'block', filter: 'grayscale(100%) contrast(1.5)' }} />
-                <h2 style={{ fontSize: '15pt', margin: 0, fontWeight: '900' }}>ACTV SaaS</h2>
-                {ticketReciente.esReimpresion && <p style={{ fontSize: '10pt', margin: '2px 0', fontWeight: '900', borderTop: '1px dashed black', borderBottom: '1px dashed black', padding: '2px 0' }}>{ticketReciente.historico ? 'COPIA HISTÓRICA · PAGO SIN VALIDAR' : 'REIMPRESIÓN'}</p>}
-                <p style={{ fontSize: '9pt', margin: 0, padding: '2px', backgroundColor: 'black', color: 'white' }}>{copia === 1 ? 'ORIGINAL - CLIENTE' : 'COPIA - ORGANIZADOR'}</p>
-                <p style={{ marginTop: '5px' }}>==========================</p>
-              </div>
-
-              <p><strong>Ticket:</strong> {ticketReciente.order_id || ticketReciente.id_db || 'N/A'}</p>
-              {/* ✅ AQUÍ SE IMPRIME EL CAJERO ORIGINAL EN LA MINIPRESORA */}
-              <p><strong>Cajero:</strong> {ticketReciente.cajero_original || nombreCajero || 'Usuario'}</p>
-              <p><strong>Fecha:</strong> {new Date(ticketReciente.fecha_hora).toLocaleString('es-MX')}</p>
-              <p><strong>Evento:</strong> {ticketReciente.evento_nombre}<br/><strong>Fecha:</strong> {ticketReciente.evento_fecha ? new Date(ticketReciente.evento_fecha + 'T12:00:00').toLocaleDateString('es-MX', {day: '2-digit', month: 'long', year: 'numeric'}).replace(/ de /g, '-') : ''}</p>
-              <p>==========================</p>
-
-              {ticketReciente.atletas_data.map((atleta, idx: number) => (
-                <div key={idx} style={{ marginBottom: '8px' }}>
-                  <p style={{ fontSize: '11pt', fontWeight: '900' }}>{idx + 1}. {atleta.nombre} {atleta.apellido}</p>
-                  <p style={{ fontSize: '12pt', fontWeight: '900', color: 'black' }}>FOLIO: {ticketReciente.folios_array[idx]}</p>
-                  <div style={{ fontSize: '9pt', paddingLeft: '5px' }}>
-                    <p>• Gen: {atleta.genero} / Talla: {atleta.talla_playera}</p>
-                    <p>• Club: {atleta.club || 'Libre'}</p>
-                    <p>• Tel: {atleta.telefono}</p>
-                  </div>
-                </div>
-              ))}
-
-              <p>==========================</p>
-              <p><strong>Paquete:</strong> {ticketReciente.paquete_comprado}</p>
-              {ticketReciente.metodo_pago && <p><strong>Método:</strong> {ticketReciente.metodo_pago}</p>}
-              <p style={{ fontSize: '12pt', fontWeight: '900' }}>{ticketReciente.historico ? 'IMPORTE REGISTRADO:' : 'PAGO TOTAL:'} ${ticketReciente.monto_total} MXN</p>
-
-              <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
-                <QRCode value={ticketReciente.folios} size={90} style={{ height: "auto", maxWidth: "25mm", width: "25mm" }} />
-              </div>
-
-              <div style={{ fontSize: '7.5pt', textAlign: 'justify', marginTop: '10px', padding: '0 2px', lineHeight: '1.2' }}>
-                <strong>EXONERACIÓN:</strong> Declaro que participo voluntariamente, asumo los riesgos físicos y libero a ACTV y organizadores de toda responsabilidad por lesiones o incidentes durante el evento.
-              </div>
-
-              {copia === 2 && (
-                <div style={{ marginTop: '30px', textAlign: 'center' }}>
-                  <p>__________________________</p>
-                  <p style={{ fontSize: '8pt', marginTop: '3px' }}>Firma de Conformidad</p>
-                </div>
-              )}
-
-              <p style={{ marginTop: '10px' }}>==========================</p>
-              <div style={{ fontSize: '8pt', textAlign: 'center', marginTop: '5px' }}>
-                <p>No válido para efectos fiscales.</p>
-                <p style={{ marginTop: '5px' }}>¡GRACIAS POR CORRER CON ACTV!</p>
-                <p style={{ marginTop: '5px', fontWeight: '900' }}>actv.mx</p>
-              </div>
-
-              {copia === 1 && <div style={{ borderBottom: '1px dashed black', margin: '2.5mm 0' }}></div>}
-            </div>
-          ))}
-        </div>,
-        document.body
-      )}
     </section>
   );
 }

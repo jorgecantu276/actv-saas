@@ -78,6 +78,9 @@ try {
   for (const path of (await readdir(migrations)).filter(name => name.endsWith('.sql')).sort()) {
     await db.query(await readFile(new URL(path, migrations), 'utf8'));
   }
+  // The candidate installs paused. Only this owned synthetic workload opens it.
+  assert.equal((await db.query('select paused from actv_payments.sales_control')).rows[0].paused, true);
+  await db.query('update actv_payments.sales_control set paused=false');
   await db.query("insert into perfiles(id,email,rol,eventos_asignados) values($1,'cashier@example.invalid','Administrador','{}')", [cashier]);
   await db.query("insert into actv_payments.staff(user_id,role,all_events) values($1,'manager',true)", [cashier]);
   await db.query("insert into actv_payments.accounts values('00000000-0000-4000-8000-000000000ac7',false,$1,true)", [stripeAccount]);

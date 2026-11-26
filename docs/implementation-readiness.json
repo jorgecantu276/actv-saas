@@ -96,8 +96,8 @@
     },
     {
       "id": "E4",
-      "scope": "current_local_source",
-      "reference": "components/TabEntregaKits.tsx:146-160",
+      "scope": "historical_source_defect",
+      "reference": "Pre-0.2.0-rc.3 components/TabEntregaKits.tsx",
       "supports": "Guarded handover rejects zero-row success; file removal is attempted without checking success; other update errors skip that cleanup"
     },
     {
@@ -135,6 +135,12 @@
       "scope": "complete_local_operational_baseline_and_staff_lifecycle",
       "reference": "docs/staging-baseline.md; tests/staging/baseline-catalog.json; CI artifact .verification/full-staging.json",
       "supports": "Fresh metadata-derived nine-table baseline, actual local Auth/Storage/PostgREST, clean/retained-record migration and staff provisioning/revocation contracts. Not hosted configuration, storage privacy/retention, device or cutover acceptance."
+    },
+    {
+      "id": "E11",
+      "scope": "source_candidate_evidence_receipts_sales_recovery",
+      "reference": "docs/evidence-receipts-recovery.md; CI artifact .verification/full-staging.json at the tested revision",
+      "supports": "Candidate private evidence access, handover/cleanup recovery, authoritative sale receipts and sales pause/original-order recovery contracts. Approved retention, hosted scheduler/rollout, physical printing and full W6/W7 acceptance remain separate."
     }
   ],
   "benchmark_method": {
@@ -887,10 +893,10 @@
     }
   ],
   "source_consolidation": {
-    "version": "0.2.0-rc.2",
-    "ref": "codex/actv-staging-staff",
+    "version": "0.2.0-rc.3",
+    "ref": "codex/actv-evidence-receipts-gate",
     "manifest": "ops/source-candidate.json",
     "verification_command": "npm run verify",
-    "scope": "Source candidate with complete captured operational baseline on isolated actual Supabase services and atomic staff lifecycle; hosted/device/cutover acceptance remains unqualified."
+    "scope": "Source candidate with private kit evidence, durable cleanup, authoritative shared sale receipts and server sales pause/recovery on the complete isolated staging baseline; policy, hosted, device and cutover acceptance remain unqualified."
   }
 }

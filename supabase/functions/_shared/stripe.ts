@@ -1,6 +1,7 @@
 import Stripe from 'npm:stripe@23.1.0';
 import { appOrigin, env, HttpError, liveMode, rpc } from './http.ts';
 import type { Order } from './orders.ts';
+import { authorizeProviderAttempt } from './sales-gate.ts';
 
 export { Stripe };
 
@@ -111,6 +112,7 @@ export async function createCheckoutSession(stripe: Stripe, order: Order, accoun
   const cancel = new URL(success);
   cancel.searchParams.set('cancelado', '1');
   const metadata = orderMetadata(order);
+  await authorizeProviderAttempt(order.order_id, 'checkout');
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
     adaptive_pricing: { enabled: false },
@@ -144,6 +146,7 @@ function matchesTerminalOrder(intent: Stripe.PaymentIntent, order: Order) {
 }
 
 export async function createTerminalIntent(stripe: Stripe, order: Order, account: string) {
+  await authorizeProviderAttempt(order.order_id, 'terminal_intent');
   const intent = await stripe.paymentIntents.create({
     currency: order.currency,
     amount: order.amount,

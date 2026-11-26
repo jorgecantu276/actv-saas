@@ -22,7 +22,7 @@ Status never dispatches Actions, modifies readiness or contacts operational serv
 
 Update the product report when scope/evidence changes. Readiness is the single acceptance record; the plan owns W0–W7 order/dependencies/exit gates. Project-board cards index packages and never confer acceptance. A PASS requires candidate/configuration/environment, reviewer, result and evidence under the existing evidence rule. W6 release approval and W7 actual installation remain separate.
 
-The `ACTV product record` workflow validates this record/tool only. Existing application CI remains separate; the unified full-release `npm run verify` is still a W1 deliverable.
+The `ACTV product record` workflow validates this record/tool only. The separate `ACTV candidate verification` workflow runs `npm run verify` against the exact source head; it establishes source verification, with complete release acceptance still governed by W6/W7.
 
 ## Supported source verification
 
