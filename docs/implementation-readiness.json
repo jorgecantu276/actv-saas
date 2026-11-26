@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "updated_on": "2026-11-22",
+  "purpose": "Single current record for discovery decisions, known defects and required acceptance. Dated research is supporting evidence, not a competing task list.",
+  "readiness": "NOT_QUALIFIED",
+  "capability_inventory_complete": false,
+  "candidate_sha": null,
+  "release_evidence_index": null,
+  "acceptance_gate_default": "W6",
+  "closure_rule": "W0 resolves discovery and assigns named owners; W2-W5 implement and pass their contracts. Before cutover, W6 requires all W6-gated checks and decisions with candidate/configuration-bound evidence. Explicit W7 production outcomes remain NOT_RUN until after the authorized switch; they are not fabricated or required before deployment. No policy approval or inherited test result alone makes a check pass. Final completion includes W7 acceptance. No progress percentage is inferred from this incomplete inventory.",
+  "evidence_rule": "Historical/source/metadata observations retain their original scope. Verification requires a named reviewer, recorded result, candidate/configuration/environment and evidence reference. Reuse manual evidence only with a recorded unchanged relevant scope. Do not store secrets or participant data here.",
+  "scope": {
+    "application": "One Hostinger application and one Supabase operational core; total race/POS replacement after qualification.",
+    "preserve": "Existing operational Supabase records, Auth IDs, folios and required staff capabilities; existing merchandise store remains unchanged.",
+    "exclude": "New store, external timing/results, external historical-account/order imports, unqualified second online provider and assumed new hardware/platform purchases."
+  },
+  "named_owners": {
+    "engineering_primary": null,
+    "engineering_backup": null,
+    "actv_operations": null,
+    "actv_finance": null,
+    "actv_privacy_contact": null,
+    "actv_legal_reviewer": null
+  },
+  "domains": [
+    {"id": "events", "authority": "Shared event write contract and existing SQL capacity/folio allocator", "owner_role": "engineering_primary", "targets": ["components/TabEventos.tsx", "app/organizadores/", "supabase/migrations/"]},
+    {"id": "registrations", "authority": "Server registration snapshots, verified claims and distinct attendance observations", "owner_role": "engineering_primary", "targets": ["supabase/migrations/20261114011600_actv_runner_organizer_portals.sql", "supabase/functions/_shared/orders.ts", "app/mi-actv/"]},
+    {"id": "payments", "authority": "Existing SQL ledger and signed/recoverable payment Edge functions", "owner_role": "engineering_primary", "targets": ["supabase/functions/_shared/stripe-events.ts", "supabase/functions/actv-checkout/", "supabase/functions/actv-stripe-reconcile/"]},
+    {"id": "receipts", "authority": "Authorized server receipt DTO and one sale renderer to complete in W3/W4", "owner_role": "engineering_primary", "targets": ["components/CajaCobros.tsx", "components/TabReportes.tsx", "components/TabListaAtletas.tsx"]},
+    {"id": "access", "authority": "Backend actor/event checks, RLS/grants and one provisioning/revocation path", "owner_role": "engineering_primary", "targets": ["supabase/functions/_shared/http.ts", "supabase/migrations/", "app/actions/usuarios.ts", "components/TabUsuarios.tsx"]}
+  ],
+  "evidence_catalog": [
+    {"id": "E1", "scope": "historical_local_sandbox", "reference": "November 13 exo/work/actv-stripe-local scenario artifacts, indexed by ACTV-historical-research-review-2026-11-22.txt", "supports": "MX/US/CA cards in MXN, successful 3DS, declines/retry, group price/folio/fee and refund/fee-reversal mechanics; no hosted/device/bank-settlement claim"},
+    {"id": "E2", "scope": "historical_local_synthetic", "reference": "November 13 exo/work/actv-recovery-scenarios-result.json and local staging tests", "supports": "Lost/out-of-order/duplicate notices, provider/mismatch failures, last-place late capture enters review; operational resolution still unqualified"},
+    {"id": "E3", "scope": "production_metadata_only", "reference": "November 22 how-x20/work/actv-case-retention-status.json and companion read-only SQL", "supports": "153 retained cleanup runs failed, latest failed, evidence bucket public; no photo access or current error-cause proof"},
+    {"id": "E4", "scope": "current_local_source", "reference": "components/TabEntregaKits.tsx:146-160", "supports": "Guarded handover rejects zero-row success; file removal is attempted without checking success; other update errors skip that cleanup"},
+    {"id": "E5", "scope": "historical_local_checks", "reference": "November 22 grading report and recorded build/type/lint/unit outputs", "supports": "Configured build/type check, 25 backend and 3 runner-history unit tests passed; lint reported 150 errors/41 warnings; no candidate release qualification"},
+    {"id": "E6", "scope": "historical_requirements_and_defects", "reference": "ACTV-historical-research-review-2026-11-22.txt; November 5 audits and November 13 architecture/script/route inventories", "supports": "Required fields/waivers, registration preferences, historical receipt/relay/date defects, route conflicts and modeled burst target"},
+    {"id": "E7", "scope": "separate_planning_artifact", "reference": "Plan product maintenance dashboard chat; November 22 i-w/outputs/product-maintenance-scope.json", "supports": "Shared monitoring proposal exists; ACTV assessment uses old main 45c6962 and provisional pilot wording; no transactional-health or update-delivery proof"},
+    {"id": "E8", "scope": "official_law_and_bounded_source_review", "reference": "ACTV-Mexico-privacy-and-payment-compliance-review-2026-11-22.txt; current Diputados statutory PDFs and official DOF sources cited there", "supports": "Dated applicability/gap assessment, not compliance certification. Legal entity/notices/contracts/minors/provider and operational evidence remain unverified; public-site policy labels alone do not establish complete notices."}
+  ],
+  "benchmark_method": {
+    "reviewed_on": "2026-11-22",
+    "scope": "Recent 2025-2026 US race cases and a UK size-matched conference; documented comparison, not a measured competitor or Hugging Face benchmark run.",
+    "report": "ACTV-scope-benchmark-US-Western-Europe-Hugging-Face-2026-11-22.txt",
+    "references": [
+      {"resource": "SlopCodeBench", "url": "https://huggingface.co/papers/2603.24755", "runner_revision_observed": "de70a479acce7b565d2d0c772f48d7c881c15510", "use": "Preserve earlier contracts through successive extensions; review duplicated business authorities and coupling."},
+      {"resource": "SWE-bench Pro V2", "url": "https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro", "dataset_revision_observed": "2d52cb3df914a3fcf80c7f66738b3a88ae37fc50", "use": "Reproduce a real defect and require fail-to-pass plus preserved passing regressions; no leaderboard score is transferred to ACTV."},
+      {"resource": "OpenEnv tau2", "url": "https://huggingface.co/docs/openenv/main/environments/tau2", "use": "Assert approved-policy and final persisted outcomes; deterministic money/access checks and human physical acceptance, without an AI runtime."}
+    ],
+    "focused_change_sequence": ["G3-A", "G3-B", "G4-A", "G5-A", "G6-A", "F5-A"],
+    "rules": "Use synthetic initial states, approved policy, actor/actions/failures and independent expected outcomes. At each change retain applicable earlier passes, record candidate/configuration/fixture scope and review the diff for duplicate price/access/folio authorities. This sequence waives no applicable W6 check, including legal acceptance; hard correctness failures cannot be averaged away.",
+    "execution": "Reference methods only per user instruction. Runtime/credential preflight and incomplete source-checkout preparation occurred before benchmark execution was canceled; no benchmark task, model inference, dataset installation or ACTV data upload occurred."
+  },
+  "items": [
+    {
+      "id": "G1", "title": "Kit-evidence access, retention and compensation", "status": "OPEN", "packages": ["W0", "W2", "W4", "W6"], "owner_roles": ["engineering_primary", "actv_operations"], "existing_evidence": ["E3", "E4"],
+      "source_targets": ["components/TabEntregaKits.tsx", "supabase/migrations/", "supabase/operations/"],
+      "decision": {"status": "OPEN", "owner_role": "actv_operations", "required": "Allowed readers, retention origin/window/exceptions, orphan grace period and treatment of expired evidence after restore."},
+      "invariants": ["Keep existing Storage; evidence reads are authorized and event-scoped in the replacement. Unknown legacy actor/time stays unknown.", "After a lost update response, recover the original registration/object reference before compensation; never delete a possibly committed attachment blindly."],
+      "acceptance": [
+        {"id": "G1-A", "status": "NOT_RUN", "kind": "hosted_synthetic", "pass_when": "Assigned user reads synthetic evidence; anonymous, unrelated-event and revoked users fail, including copied old public links after cutover. Old-app compatibility is maintained until the coordinated switch."},
+        {"id": "G1-B", "status": "NOT_RUN", "kind": "hosted_synthetic", "pass_when": "Supported Storage deletion removes expired objects, preserves unexpired/held objects and safely reruns; forced cleanup/removal failure reaches the responder and retries. Restore obeys the approved access/expiry policy."},
+        {"id": "G1-C", "status": "NOT_RUN", "kind": "failure_injection", "pass_when": "Upload failure, upload success followed by a definite update error, zero-row update, committed-but-lost response and failed removal produce no false handover. Referenced evidence survives; proven unreferenced files are eventually removed with visible failures."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "G2", "title": "Traceable historical defect closure", "status": "OPEN", "packages": ["W0", "W4", "W5", "W6"], "owner_roles": ["engineering_primary", "actv_operations"], "existing_evidence": ["E4", "E6"],
+      "source_targets": ["components/TabCaja.tsx", "components/TabReportes.tsx", "components/TabListaAtletas.tsx", "components/TabEntregaKits.tsx", "components/TabCotizaciones.tsx"],
+      "decision": {"status": "OPEN", "owner_role": "actv_operations", "required": "Confirm retained workflows and explicit disposition of every prior defect; local fixes require regression and applicable hosted/device evidence."},
+      "invariants": ["A historical report is not proof a bug remains; a local fix is not proof the deployed path passes."],
+      "acceptance": [
+        {"id": "G2-A", "status": "NOT_RUN", "kind": "automated_and_physical", "pass_when": "Original and reprinted $700/two-folio receipt agree; relay member changes recalculate correctly; wrong-event/group folios resolve safely; civil-date boundaries, handover ordering and required quotation/WhatsApp formats match approved behavior."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "G3", "title": "Registration snapshots and applicable consent", "status": "OPEN", "packages": ["W0", "W2", "W3", "W6"], "owner_roles": ["engineering_primary", "actv_operations"], "existing_evidence": ["E6"],
+      "source_targets": ["supabase/functions/_shared/orders.ts", "app/carreras/[slug]/checkout.tsx", "components/TabListaAtletas.tsx", "supabase/migrations/"],
+      "decision": {"status": "OPEN", "owner_role": "actv_operations", "required": "Per-event fields/consent and acceptance step, correction cutoff, old missing-evidence treatment; minors/guardians only if applicable. No size-stock or courtesy-entry feature is assumed."},
+      "invariants": ["Freeze accepted participant/package/shirt choices and applicable consent evidence on the entry; profile preferences cannot silently rewrite prior entitlements.", "Corrections retain before/after, actor, time and reason; buyer, participant, account ownership and consent remain distinct."],
+      "acceptance": [
+        {"id": "G3-A", "status": "NOT_RUN", "kind": "database_and_api", "pass_when": "Online/cash/direct API enforce approved fields at the chosen step; later profile edits leave prior receipts/kit choices intact; reused request IDs cannot swap accepted snapshots. Missing old consent remains unknown."},
+        {"id": "G3-B", "status": "NOT_RUN", "kind": "database_and_api", "pass_when": "Authorized typo/contact/DOB correction is audited and preserves payment/folio identity; unauthorized ownership changes fail. Companion and any applicable guardian evidence follow the approved separate states."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "G4", "title": "Refund, eligibility and attended-history outcomes", "status": "OPEN", "packages": ["W0", "W2", "W3", "W6"], "owner_roles": ["engineering_primary", "actv_finance", "actv_operations"], "existing_evidence": ["E1", "E2"],
+      "source_targets": ["supabase/migrations/20261114011400_actv_mercadopago.sql", "supabase/migrations/20261114011600_actv_runner_organizer_portals.sql", "supabase/functions/actv-admin-payments/", "app/mi-actv/"],
+      "decision": {"status": "OPEN", "owner_role": "actv_finance", "required": "Whole-order review versus participant-scoped resolution, kit/capacity effects, fee/funding policy after payout, public-recognition treatment and support deadlines for paid/no-place or distinct duplicate purchases."},
+      "invariants": ["Retain the whole-order safety hold until an approved replacement rule is implemented; provider-originated adjustments remain processable even if an optional refund UI action is unavailable.", "Financial changes alone do not erase observed attendance or its event/registration identity. Authorized personal history distinguishes retained observation from current entry eligibility, subject to approved lawful retention and rights handling; public sharing/recognition follows its separate approved rule."],
+      "acceptance": [
+        {"id": "G4-A", "status": "NOT_RUN", "kind": "database_and_hosted_provider", "pass_when": "Three-person captured order with one confirmed attendee receives partial refund and replay/dispute transitions: exact money/fee totals and selected eligibility rule hold; no accidental capacity release; attendance evidence and authorized personal history remain truthful. Exercise the SQL/RPC path, not just a UI helper."},
+        {"id": "G4-B", "status": "NOT_RUN", "kind": "operational_drill", "pass_when": "Late captured/no-place and fresh duplicate-purchase cases reach the named owner and approved resolution without extra folios/refunds. Funding failure or unresolved dispute has visible state, payer communication and escalation."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "G5", "title": "Race editions, disruption and attendance correction", "status": "OPEN", "packages": ["W0", "W2", "W3", "W5", "W6"], "owner_roles": ["engineering_primary", "actv_operations", "actv_finance"], "existing_evidence": ["E6"],
+      "source_targets": ["components/TabEventos.tsx", "components/TabListaAtletas.tsx", "app/organizadores/", "supabase/migrations/", "app/mi-actv/"],
+      "decision": {"status": "OPEN", "owner_role": "actv_operations", "required": "Postpone/cancel remedies and contacts; allowed corrections versus transfers; capacity unit and civil cutoffs; observation that confirms attendance and authorized correction procedure."},
+      "invariants": ["The existing event ID identifies an edition; next year uses a distinct event record. A postponement records the date change without turning old entries into a new edition.", "A profile edit cannot transfer ownership or imply attendance; payment, reprint and kit pickup alone do not confirm attendance."],
+      "acceptance": [
+        {"id": "G5-A", "status": "NOT_RUN", "kind": "database_and_operational", "pass_when": "Postpone/cancel a sold edition with a pending payment using the approved remedy: IDs/entitlements and notice ownership remain coherent, replay cannot double-refund, cancellation creates no attendance. A new annual edition leaves prior history unchanged."},
+        {"id": "G5-B", "status": "NOT_RUN", "kind": "database_and_api", "pass_when": "Allowed correction/transfer follows an authorized audited transition or is explicitly refused; attendance observation/correction retains actor/time/reason and respects verified participant ownership."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "G6", "title": "Physical handover, connectivity and queue operation", "status": "OPEN", "packages": ["W0", "W2", "W4", "W5", "W6"], "owner_roles": ["engineering_primary", "actv_operations"], "existing_evidence": ["E4", "E6"],
+      "source_targets": ["components/TabEntregaKits.tsx", "components/TabListaAtletas.tsx", "public/manifest.json", "public/sw.js", "app/organizadores/"],
+      "decision": {"status": "OPEN", "owner_role": "actv_operations", "required": "Proxy and partial-group pickup evidence/correction; peak arrival window, available stations/connectivity and numeric service goal. Confirm online-required pause/recovery or separately qualify a required controlled fallback."},
+      "invariants": ["Baseline requires an authoritative online response for new sale/kit/attendance mutations; show unknown outcome and recover the original record. No multi-device offline queue or parallel manual ledger is assumed.", "One authorized transition per registration precedes handover; a group receipt/reprint does not grant another kit. If interrupted between recording and physical handover, a lead resolves the uncertainty with an audit trail; stored status alone cannot prove physical delivery. Each operator keeps only assigned permissions."],
+      "acceptance": [
+        {"id": "G6-A", "status": "NOT_RUN", "kind": "hosted_and_physical", "pass_when": "Two stations attempt the same participant; approved proxy and partial group collection, wrong-event code and post-collection reprint preserve one entitlement, visible conflicts and an audited correction path. Test disconnect before submission, response loss after commit, and interruption between recorded claim and physical handover; the lead resolves uncertainty without automatic repeat delivery."},
+        {"id": "G6-B", "status": "NOT_RUN", "kind": "physical", "pass_when": "Timed ACTV arrival burst with novice operator and shift change meets the recorded target; no-phone/same-name cases, recent purchase, recovery exception and paper-out have a usable lead route. Include shared-printer contention where applicable; more tablets alone cannot be assumed to increase paper/handover capacity. Use existing equipment or record a shortfall before assuming purchases."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "G7", "title": "Burst, migration and abuse qualification", "status": "OPEN", "packages": ["W0", "W1", "W2", "W3", "W6"], "owner_roles": ["engineering_primary", "actv_operations"], "existing_evidence": ["E2", "E5", "E6"],
+      "source_targets": ["tests/staging-payments.mjs", "tests/staging-edge.ts", "supabase/migrations/", "supabase/functions/actv-checkout/", "supabase/functions/actv-stripe-reconcile/"],
+      "decision": {"status": "OPEN", "owner_role": "engineering_primary", "required": "Declare arrival profile, latency/backlog goals, lock/statement/deployment budgets and abuse limits; ACTV operations accepts sales-pause and retry/exception behavior."},
+      "invariants": ["Reuse current idempotency, holds, allocator and bounded recovery. Keep account creation optional and guest checkout available; protect legitimate shared-Wi-Fi/family traffic.", "Throttling/new-creation pause does not discard signed callbacks or accepted-order fulfillment. Migration timeout/abort must preserve and reconcile accepted work."],
+      "acceptance": [
+        {"id": "G7-A", "status": "NOT_RUN", "kind": "hosted_synthetic", "pass_when": "Run 1,500 purchases using a declared overlapping-event burst; use the historical 300 orders/minute model as an initial hypothesis. Include representative accumulated records and highest-supported configuration shapes; measure a hot event while other events and staff lookup stay usable. Record actual arrivals, failures, per-event latency, lock/pool pressure and backlog drain; zero unpaid/duplicate folios or oversell. Real provider sandbox checks remain separate."},
+        {"id": "G7-B", "status": "NOT_RUN", "kind": "disposable_staging", "pass_when": "With representative old data, a held competing transaction, accepted pending orders and delayed callbacks, supported migrations either complete within declared budgets or fail observably through the rehearsed recovery path. Inspect partial application; then reconcile all accepted work before reopening."},
+        {"id": "G7-C", "status": "NOT_RUN", "kind": "api_and_database", "pass_when": "Direct RPC/Edge and rotated-request attempts cannot bypass hold/claim/request limits; legitimate declared shared-IP guests/families still complete. Same-request retries add no holds; abandoned holds release correctly; accepted lookup, callbacks and recovery remain usable."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "G8", "title": "Concrete public origins and retained destinations", "status": "OPEN", "packages": ["W0", "W1", "W5", "W6"], "owner_roles": ["engineering_primary", "actv_operations"], "existing_evidence": ["E6"],
+      "source_targets": ["docs/wordpress-preservation.md", "app/carreras/[slug]/page.tsx", "app/inicio/", "supabase/config.toml"],
+      "decision": {"status": "OPEN", "owner_role": "actv_operations", "required": "Choose public origin and retained/redirected/authorized-retired destination for every inventoried route; identify DNS/routing owners."},
+      "invariants": ["Preserve existing store/account/reset and retained content by correct links/routing; excluded imports do not become a continuity dependency."],
+      "acceptance": [
+        {"id": "G8-A", "status": "NOT_RUN", "kind": "final_origin", "pass_when": "Inventory paths, media, deep links, Auth and payment returns reach intended destinations without loops/conflicts. Safely smoke-test retained store/account/reset paths; replacement race/order lookup and bundled receipt assets work during a staged WordPress outage. No live purchase or customer-data copying is implied."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "F1", "title": "Complete release baseline, access and continuity", "status": "OPEN", "packages": ["W0", "W1", "W2", "W6"], "owner_roles": ["engineering_primary", "actv_operations"], "existing_evidence": ["E5", "E6"],
+      "source_targets": [".github/workflows/actv-pdv.yml", "tests/staging-base.sql", "supabase/config.toml", "supabase/migrations/", "app/actions/usuarios.ts"],
+      "acceptance": [
+        {"id": "F1-A", "status": "NOT_RUN", "kind": "candidate_ci_and_hosted", "pass_when": "Curated app/schema/functions/config/jobs identify one candidate; clean and representative in-place full-schema upgrades pass. Role/claim/provision/revoke matrix denies cross-event/user access and preserves existing valid IDs/folios/capacity. Ordinary verify rejects production and cannot deploy, alter hosted secrets, charge or print."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "F2", "title": "All-channel finance, guest recovery and delivery", "status": "OPEN", "packages": ["W3", "W6"], "owner_roles": ["engineering_primary", "actv_finance"], "existing_evidence": ["E1", "E2", "E5"],
+      "source_targets": ["supabase/functions/", "components/CajaCobros.tsx", "components/ConciliacionCobros.tsx", "app/registro/estado/"],
+      "acceptance": [
+        {"id": "F2-A", "status": "NOT_RUN", "kind": "hosted_provider_and_operational", "pass_when": "Individual/group/relay online, cash and qualified actual reader use one ledger. MX/US/CA-in-MXN and 3DS success/abandonment/decline, refunds/disputes and missed notices pass; guest and counter restart recover originals. Actual test email/folio delivery, organizer settlement ownership and cash close/deposit matching are demonstrated."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "F3", "title": "Real equipment and retained staff capabilities", "status": "OPEN", "packages": ["W4", "W5", "W6"], "owner_roles": ["engineering_primary", "actv_operations"], "existing_evidence": ["E6"],
+      "source_targets": ["components/TabCaja.tsx", "components/TabReportes.tsx", "components/TabListaAtletas.tsx", "components/TabCotizaciones.tsx", "public/manifest.json"],
+      "acceptance": [
+        {"id": "F3-A", "status": "NOT_RUN", "kind": "physical_and_operator", "pass_when": "Actual Samsung/PT210 route and identified reader pass paper/QR/accents/group/reconnect/restart/camera tests. Print request is not claimed physical success; retries reuse original folios. Capability matrix covers clubs/users/assignments/reports/clients/services/quotations/WhatsApp, and assigned tasks need no SQL/CLI/developer."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "F4", "title": "Recovery, alert delivery and maintenance handover", "status": "OPEN", "packages": ["W0", "W6", "W7"], "owner_roles": ["engineering_primary", "engineering_backup", "actv_operations", "actv_finance"], "existing_evidence": ["E2", "E3", "E7"],
+      "source_targets": ["supabase/operations/", "supabase/functions/actv-stripe-reconcile/", "docs/actv-go-live.md"],
+      "acceptance": [
+        {"id": "F4-A", "status": "NOT_RUN", "kind": "operational_drill", "pass_when": "Named primary/backup and numeric coverage/response/health thresholds exist. Independent heartbeat plus capture/review/refund/recovery/cleanup failures reach and escalate to them, including failed background operations while pages still return HTTP 200. Database AND kit evidence restore within accepted recovery limits, with cash/provider reconstruction using original identities."},
+        {"id": "F4-B", "status": "NOT_RUN", "kind": "operational_drill", "pass_when": "One runbook records monthly support/update review, urgent triage/mitigation targets, quarterly/relevant-change restores and station-update regression. If the shared dashboard is integrated, prove it receives only authenticated aggregate health/version/age signals; otherwise record NOT_INTEGRATED and prove the working fallback and independent heartbeat without it. A working alert route is mandatory; its provisional pilot wording cannot override ACTV's whole-release/cutover controls."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "F5", "title": "Closed-gate total cutover and first shift", "status": "OPEN", "packages": ["W0", "W3", "W6", "W7"], "owner_roles": ["engineering_primary", "actv_operations", "actv_finance"], "existing_evidence": ["E2", "E6"],
+      "source_targets": ["public/manifest.json", "public/sw.js", "supabase/functions/", ".github/workflows/actv-pdv.yml"],
+      "acceptance": [
+        {"id": "F5-A", "status": "NOT_RUN", "kind": "staging_rehearsal", "pass_when": "All inventoried old issuers/stale clients and new guest/cash/card creation are closed at the backend. Pending accepted payments still settle exactly once; lookup/reprints remain. Matching whole-release evidence and old-writer shutoff precede one authorized reopen. Any new order/attempt invokes preserve-and-reconcile recovery, never blind snapshot restore."},
+        {"id": "F5-B", "status": "NOT_RUN", "gate": "W7", "kind": "authorized_production_acceptance", "pass_when": "Refresh real obligation/registration counts, execute the rehearsed switch, reconcile authorized controlled live checks and first shift, and confirm the old race/POS and obsolete issuers are off while the existing store remains intact. Creating this record does not authorize deployment or a live charge."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "L1", "title": "Mexican privacy, rights and conditional minors obligations", "status": "OPEN", "packages": ["W0", "W2", "W4", "W5", "W6"], "owner_roles": ["actv_privacy_contact", "actv_legal_reviewer", "actv_operations", "engineering_primary"], "existing_evidence": ["E3", "E4", "E8"],
+      "source_targets": ["app/carreras/[slug]/checkout.tsx", "app/_pagos/public-site.tsx", "app/mi-actv/", "components/TabEntregaKits.tsx", "supabase/migrations/"],
+      "legal_references": ["LFPDPPP current consolidated law: articles 5, 7-9, 11-20, 21-36", "Compatible current privacy regulation: processor/cloud/security/incident provisions", "October 14, 2026 digital-environments decree articles 1-5 and transitories: applicability must be determined, not assumed"],
+      "decision": {"status": "OPEN", "owner_role": "actv_legal_reviewer", "required": "Identify actual controller(s), purposes and data classes, consent or documented exception, privacy contact, retained-store boundary, vendor/organizer roles and cross-border treatment. Decide minor admission/representation and the 2026 decree's scope against actual features, including public sharing. No new social, biometric or age-service feature is presumed."},
+      "invariants": ["Preserve private personal race history; optional public sharing starts private and is separately revocable. A sport waiver is not automatically privacy consent, guardian authority or consent to publish kit evidence.", "Collect no unnecessary identity/biometric/billing data. Financial-record holds and statutory exceptions constrain deletion; neither privacy cancellation nor the attendance invariant means retain everything forever or delete every audit record.", "Observed public storage/failed retention is a control gap, not proof of a notifiable breach. Mandatory legal protections cannot be waived by a product-policy approval."],
+      "acceptance": [
+        {"id": "L1-A", "status": "NOT_RUN", "kind": "legal_approval_and_hosted_synthetic", "pass_when": "Approved controller/purpose/vendor map matches real online, guest/group, account, staff-assisted and photo collection points and reachable Spanish notices. Evidence proves the applicable consent/exception and optional-purpose rules. Sharing defaults private, excludes unrelated/financial/evidence data and revokes correctly. Minor/guardian and decree applicability is explicitly decided; applicable controls and transition obligations are evidenced, or a reasoned non-applicability determination is recorded."},
+        {"id": "L1-B", "status": "NOT_RUN", "kind": "rights_and_retention_drill", "pass_when": "A synthetic guest/runner or approved representative request reaches the named privacy contact, passes proportionate identity checks, records the applicable 20-business-day determination deadline and 15-business-day implementation deadline from communication of a favorable determination, including justified legal extensions, and completes with no third-person/group disclosure. Show correction, appropriate deletion/blocking, a justified financial-record retention exception, revocation and expired-data handling after restore. Reuse G1 tests."},
+        {"id": "L1-C", "status": "NOT_RUN", "kind": "access_and_incident_drill", "pass_when": "Reuse G1/W2 access cases to deny anonymous/unrelated/revoked reads and old public-link bypass. An incident exercise reaches the responder/privacy owner, records containment and impact, and applies the legally grounded notification decision and timing. Suspected exposure/control failures trigger assessment without waiting for proof an outsider downloaded a file; configuration alone does not establish every breach fact. No unrelated GDPR 72-hour clock is substituted for Mexican requirements."}
+      ], "closure_evidence": []
+    },
+    {
+      "id": "L2", "title": "Mexican consumer, payment and receipt responsibilities", "status": "OPEN", "packages": ["W0", "W3", "W4", "W5", "W6"], "owner_roles": ["actv_finance", "actv_legal_reviewer", "actv_operations", "engineering_primary"], "existing_evidence": ["E1", "E2", "E8"],
+      "source_targets": ["app/carreras/[slug]/checkout.tsx", "app/registro/estado/", "components/CajaCobros.tsx", "components/AdminPayments.tsx", "supabase/functions/"],
+      "legal_references": ["LFPC current consolidated law: articles 7, 7 BIS, 12, 32, 76 BIS/76 BIS1 and applicable mandatory remedies", "CFF articles 29, 29-A, 30; Commerce articles 38/49 and applicable conservation treatment: confirm with actual issuer/accountant", "LRITF article 22 perimeter is conditional; PCI/provider requirements are separate contractual scope"],
+      "decision": {"status": "OPEN", "owner_role": "actv_finance", "required": "Approve actual seller/contact, inclusive price and who bears ACTV/provider fees, cancellation/refund remedies, funds/account ownership, disputes, invoice issuers and existing CFDI route. Confirm whether paid recurrence exists. Legal reviewer determines actual financial perimeter; provider/device validation determines PCI scope."},
+      "invariants": ["Do not infer an extra consumer charge from ACTV's $15 commission. Advertised final MXN amount, order, payment and receipt match the approved pricing contract.", "A printed ticket or Stripe receipt is not automatically a CFDI. Use the existing approved accountant/provider route if adequate; do not collect every runner's RFC or build a tax engine by default.", "Do not infer fintech licensing or universal PCI compliance from using Stripe. Keep raw PAN/CVC outside ACTV pages, storage, logs and printed receipts; shared tablet, retained store and actual reader/provider paths require their own applicable validation.", "Consumer policies cannot waive mandatory remedies. One-off entries/free accounts do not automatically require recurring-subscription engineering; any actual recurrence is explicitly assessed."],
+      "acceptance": [
+        {"id": "L2-A", "status": "NOT_RUN", "kind": "legal_approval_and_hosted_synthetic", "pass_when": "Public registration/POS shows approved seller/contact, security/terms and cancellation/help route with inclusive MXN totals; group quantities/mandatory fees match server order, checkout and receipt. Record whether paid recurrence exists; if applicable prove the required consent/notice/cancellation path, otherwise record the reasoned boundary."},
+        {"id": "L2-B", "status": "NOT_RUN", "kind": "refund_and_support_drill", "pass_when": "Reuse G4 to resolve an approved cancellation/postponement or duplicate-payment case with correct statutory remedy, refund/fee ledger and customer communication. Preserve observed attendance subject to its approved correction/retention rule; unresolved funding/disputes remain visibly owned."},
+        {"id": "L2-C", "status": "NOT_RUN", "kind": "contracts_provider_and_receipt_evidence", "pass_when": "Evidence actual entities, organizer processor-account ownership and funds/refund/dispute flow, tablet/reader provider path and applicable PCI validation; legal reviewer closes conditional financial-regulatory scope. Show an accurately labelled sale receipt, synthetic invoice-request path and approved existing CFDI issuer/provider capability without inventing a real fiscal sale. Record statutory retention/integrity responsibilities with the accountant; no new wallet/custody/tax platform is assumed."}
+      ], "closure_evidence": []
+    }
+  ]
+}

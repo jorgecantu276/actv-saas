@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ACTV — races, folios and payments
 
-## Getting Started
+One product: public race registration, Mi ACTV and staff/organizer operations over the existing Supabase core. Merchandise stays in the existing store. Registration, folios and payments are capabilities of ACTV, not separate products.
 
-First, run the development server:
+Start with the [product report](docs/products/actv.md), [scope](docs/project-scope.md), [implementation plan](docs/implementation-plan.md), [single readiness record](docs/implementation-readiness.json) and [operations/metrics guide](ops/README.md).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+This branch adds organization and reporting. It does not consolidate newer uncommitted application work or qualify a release. Plan/readiness/scope were recovered unchanged from November 22 planning. Their targets can refer to newer development files absent here.
+
+## Working agreement
+
+1. Start with the business task and observable acceptance in W0–W7. The plan owns order and gates; readiness owns decisions and evidence.
+2. Implement bounded changes through reviewed PRs. Preserve existing records and payment/folio/access contracts. Keep excluded experiments separate from supported release composition.
+3. Use a separate reviewer for the final revision and applicable automated checks on the exact candidate.
+4. Distinguish requested, implemented, verified, published and installed. CI does not accept real devices, providers or cutover.
+5. Release through W6/W7 with ACTV acceptance and recovery evidence. Private records, credentials and configuration stay outside Git.
+
+## Status
+
+```powershell
+node ops/status.mjs --check
+node ops/status.mjs
+node --test ops/tests/status.test.mjs
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Status uses Node and authenticated GitHub CLI. It reads source metadata, CI, PRs and releases without contacting the database or operational devices. See the operations guide for private snapshot output and observing the retained development checkout.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Application development
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`npm ci` and `npm run dev` run source development with approved isolated Supabase configuration and synthetic state. Existing payment checks are documented in [payment-pilot](docs/payment-pilot.md). The unified full-release `npm run verify` remains W1 work. The existing ACTV PDV workflow has an explicit production-dispatch option; status does not dispatch it. This organization change leaves application/deployment logic unchanged.
