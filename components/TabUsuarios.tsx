@@ -3,19 +3,24 @@
 
 import { useClientReady } from '../lib/use-client-ready';
 import type { StaffProfile, StaffScreenProps } from '../lib/legacy-types';
-import { crearAccesoUsuario, actualizarContrasenaUsuario } from '../app/actions/usuarios';
+import { crearAccesoUsuario, vincularAccesoExistente, actualizarAccesoUsuario, desactivarAccesoUsuario, actualizarContrasenaUsuario } from '../app/actions/usuarios';
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { UserCog, UserPlus, Trash2, Edit, Mail, Briefcase, Lock, Search, Phone, X, Shield, PlusCircle, Store, ChevronDown } from 'lucide-react';
 
+type StaffAccess = StaffProfile & { staff_active: boolean; staff_pending: boolean };
+
 export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'eventos'>) {
   // Para evitar errores de hidratación con createPortal en Next.js
   const isMounted = useClientReady();
 
-  const [usuarios, setUsuarios] = useState<StaffProfile[]>([]);
+  const [usuarios, setUsuarios] = useState<StaffAccess[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [enviando, setEnviando] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string>();
+  const [useExistingAccount, setUseExistingAccount] = useState(false);
+  const [listError, setListError] = useState('');
 
   // ESTADO NUEVO USUARIO
   const [form, setForm] = useState({
@@ -38,16 +43,19 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
     nueva_contrasena: ''
   });
 
-  const consultarUsuarios = useCallback(() => supabase.from('perfiles').select('*'), []);
+  const consultarUsuarios = useCallback(() => supabase.rpc('actv_list_staff'), []);
   const cargarUsuarios = async () => {
-    const { data } = await consultarUsuarios();
-    if (data) setUsuarios(data);
+    const { data, error } = await consultarUsuarios();
+    setListError(error ? 'No pudimos cargar los accesos de personal.' : '');
+    if (Array.isArray(data)) setUsuarios(data as StaffAccess[]);
   };
 
   useEffect(() => {
     let active = true;
-    void consultarUsuarios().then(({ data }) => {
-      if (active && data) setUsuarios(data);
+    void consultarUsuarios().then(({ data, error }) => {
+      if (!active) return;
+      setListError(error ? 'No pudimos cargar los accesos de personal.' : '');
+      if (Array.isArray(data)) setUsuarios(data as StaffAccess[]);
     });
     return () => { active = false; };
   }, [consultarUsuarios]);
@@ -56,7 +64,7 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
   const handleCrearUsuario = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (form.password !== form.confirmPassword) {
+    if (!useExistingAccount && form.password !== form.confirmPassword) {
       alert("⚠️ Las contraseñas no coinciden. Por favor, verifícalas.");
       return;
     }
@@ -64,14 +72,20 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
     setEnviando(true);
 
     const { data: { session } } = await supabase.auth.getSession();
-    const resultado = await crearAccesoUsuario(form, session?.access_token ?? '');
+    const resultado = useExistingAccount
+      ? await vincularAccesoExistente(form, session?.access_token ?? '')
+      : await crearAccesoUsuario(form, session?.access_token ?? '', pendingUserId);
 
     if (resultado.success) {
-      alert("¡Usuario y acceso creados con éxito!");
+      alert("¡Usuario y acceso activados con éxito!");
+      setPendingUserId(undefined);
+      setUseExistingAccount(false);
       setForm({ nombre_completo: '', telefono: '', email: '', password: '', confirmPassword: '', rol: 'Cajero', eventos_asignados: [] });
       cargarUsuarios();
     } else {
+      if ('pendingUserId' in resultado && typeof resultado.pendingUserId === 'string') setPendingUserId(resultado.pendingUserId);
       alert("Error: " + resultado.error);
+      void cargarUsuarios();
     }
     setEnviando(false);
   };
@@ -119,24 +133,22 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
     e.preventDefault();
     if (!editando) return;
     setEnviando(true);
-    const rolLower = formEdit.rol?.toLowerCase();
-
-    const { error } = await supabase.from('perfiles').update({
-      nombre_completo: formEdit.nombre_completo,
-      telefono: formEdit.telefono,
-      rol: formEdit.rol,
-      eventos_asignados: (rolLower === 'moderador' || rolLower === 'cajero') ? formEdit.eventos_asignados : []
-    }).eq('id', editando.id);
-
-    if (error) {
-      alert("Error al actualizar perfil: " + error.message);
+    if (formEdit.nueva_contrasena && formEdit.nueva_contrasena.length < 8) {
+      alert('La nueva contraseña debe tener al menos 8 caracteres.');
+      setEnviando(false);
+      return;
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    const accessResult = await actualizarAccesoUsuario(editando.id, formEdit, session?.access_token ?? '');
+    if (!accessResult.success) {
+      alert('No se confirmó el cambio de acceso: ' + accessResult.error);
       setEnviando(false);
       return;
     }
 
     if (formEdit.nueva_contrasena && formEdit.nueva_contrasena.trim() !== '') {
-      if (formEdit.nueva_contrasena.length < 6) {
-        alert("La nueva contraseña debe tener al menos 6 caracteres.");
+      if (formEdit.nueva_contrasena.length < 8) {
+        alert("La nueva contraseña debe tener al menos 8 caracteres.");
         setEnviando(false);
         return;
       }
@@ -157,11 +169,18 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
     setEnviando(false);
   };
 
-  const eliminarUsuario = async (id: string, nombre: string) => {
-    if (window.confirm(`¿Eliminar definitivamente el acceso de ${nombre}?`)) {
-      const { error } = await supabase.from('perfiles').delete().eq('id', id);
-      if (!error) cargarUsuarios();
-    }
+  const eliminarUsuario = async (user: StaffAccess) => {
+    if (!window.confirm('¿Desactivar el acceso de ' + (user.nombre_completo || user.email) + '? Sus registros se conservarán.')) return;
+    setEnviando(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const result = await desactivarAccesoUsuario(user.id, {
+      nombre_completo: user.nombre_completo || user.email,
+      telefono: user.telefono || '', rol: user.rol === 'Sin acceso' ? 'Cajero' : user.rol,
+      eventos_asignados: user.eventos_asignados || [],
+    }, session?.access_token ?? '');
+    if (!result.success) alert('No se confirmó la desactivación: ' + result.error);
+    await cargarUsuarios();
+    setEnviando(false);
   };
 
   return (
@@ -187,6 +206,7 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
             <UserPlus className="w-5 h-5 mr-2 text-slate-900" /> Nuevo Acceso
           </h3>
           <form onSubmit={handleCrearUsuario} className="space-y-4">
+            {pendingUserId && <p role="status" className="text-sm text-amber-800">La cuenta está pendiente de activación. Reintenta con los mismos datos o complétala desde la lista de personal.</p>}
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Nombre Completo *</label>
               <input type="text" required value={form.nombre_completo} onChange={(e) => setForm({...form, nombre_completo: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-sm font-bold text-slate-900 placeholder:text-slate-400" />
@@ -202,17 +222,19 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
               <input type="email" required value={form.email} onChange={(e) => setForm({...form, email: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-sm font-medium text-slate-900 placeholder:text-slate-400" />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 pt-2">
+            <label className="flex gap-2 text-sm text-slate-700"><input type="checkbox" checked={useExistingAccount} onChange={e => { setUseExistingAccount(e.target.checked); setPendingUserId(undefined); }} />Usar cuenta existente, sin cambiar su contraseña</label>
+            {!useExistingAccount && <div className="grid grid-cols-1 gap-4 pt-2">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1 flex items-center"><Lock className="w-3 h-3 mr-1.5"/> Contraseña *</label>
-                <input type="password" required value={form.password} onChange={(e) => setForm({...form, password: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-sm font-mono tracking-widest text-slate-900 placeholder:text-slate-400" placeholder="••••••••" />
+                <input type="password" required minLength={8} value={form.password} onChange={(e) => setForm({...form, password: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-sm font-mono tracking-widest text-slate-900 placeholder:text-slate-400" placeholder="••••••••" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1 flex items-center"><Lock className="w-3 h-3 mr-1.5"/> Repetir Contraseña *</label>
-                <input type="password" required value={form.confirmPassword} onChange={(e) => setForm({...form, confirmPassword: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-sm font-mono tracking-widest text-slate-900 placeholder:text-slate-400" placeholder="••••••••" />
+                <input type="password" required minLength={8} value={form.confirmPassword} onChange={(e) => setForm({...form, confirmPassword: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-sm font-mono tracking-widest text-slate-900 placeholder:text-slate-400" placeholder="••••••••" />
               </div>
             </div>
 
+            }
             <div className="pt-4 border-t border-slate-100 mt-2 space-y-1.5">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Rol de Usuario *</label>
               <div className="relative group">
@@ -260,7 +282,7 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
             )}
 
             <button type="submit" disabled={enviando} className="w-full bg-slate-900 hover:bg-black disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black py-4 rounded-xl text-sm uppercase tracking-widest transition-all shadow-md active:scale-[0.98] mt-6">
-              {enviando ? 'Procesando...' : 'Crear Acceso'}
+              {enviando ? 'Procesando...' : pendingUserId ? 'Completar Acceso' : 'Crear Acceso'}
             </button>
           </form>
         </div>
@@ -269,6 +291,7 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
         {/* COLUMNA DER: LISTADO Y CONTROL                            */}
         {/* ========================================================= */}
         <div className="xl:col-span-2 space-y-6">
+          {listError && <p role="alert" className="text-sm text-red-700">{listError}</p>}
           <div className="relative group">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
             <input
@@ -282,7 +305,7 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
           <div className="grid grid-cols-1 gap-5">
             {usuarios.filter(u => u.rol?.toLowerCase().includes(busqueda.toLowerCase()) || u.nombre_completo?.toLowerCase().includes(busqueda.toLowerCase())).map((u) => {
               const rL = u.rol?.toLowerCase();
-              const rolUI = rL.includes('admin') ? 'Administrador' : rL.includes('pdv') ? 'PDV ACTV' : rL.includes('moderad') ? 'Moderador' : 'Cajero';
+              const rolUI = !u.staff_active ? (u.staff_pending ? 'Pendiente de activación' : 'Sin acceso') : rL.includes('admin') ? 'Administrador' : rL.includes('pdv') ? 'PDV ACTV' : rL.includes('moderad') ? 'Moderador' : 'Cajero';
 
               return (
               <div key={u.id} className="bg-white p-5 rounded-3xl ring-1 ring-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-5 group">
@@ -315,7 +338,7 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
                   <button onClick={() => abrirEdicion(u)} className="p-3 bg-white border border-slate-200 text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 rounded-xl transition-all shadow-sm">
                     <Edit className="w-4 h-4" />
                   </button>
-                  <button onClick={() => eliminarUsuario(u.id, u.nombre_completo || u.email)} className="p-3 bg-white border border-slate-200 text-red-500 hover:bg-red-50 hover:border-red-200 rounded-xl transition-all shadow-sm">
+                  <button disabled={enviando || (!u.staff_active && !u.staff_pending)} title="Desactivar acceso" onClick={() => eliminarUsuario(u)} className="p-3 bg-white border border-slate-200 text-red-500 hover:bg-red-50 hover:border-red-200 rounded-xl transition-all shadow-sm">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -406,7 +429,8 @@ export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'ev
               <div className="pt-5 mt-6 border-t border-slate-100">
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 flex items-center tracking-wider pl-1"><Lock className="w-3 h-3 mr-1.5"/> Forzar Nueva Contraseña</label>
                 <input
-                  type="text"
+                  type="password"
+                  minLength={8}
                   value={formEdit.nueva_contrasena}
                   onChange={(e) => setFormEdit({...formEdit, nueva_contrasena: e.target.value})}
                   placeholder="Escribe para cambiarla..."

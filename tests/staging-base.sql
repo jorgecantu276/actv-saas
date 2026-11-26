@@ -8,12 +8,13 @@ create role anon nologin;
 create role authenticated nologin;
 create role service_role nologin bypassrls;
 create schema auth;
-create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);
+create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz,
+  raw_user_meta_data jsonb default '{}'::jsonb,raw_app_meta_data jsonb default '{}'::jsonb);
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true),'')::uuid
 $$;
 grant usage on schema auth to authenticated, service_role;
-create table public.perfiles(id uuid primary key, email text not null, rol text, eventos_asignados uuid[]);
+create table public.perfiles(id uuid primary key, email text not null, rol text, eventos_asignados uuid[],nombre_completo text,telefono text);
 create table public.atletas(
   id uuid primary key default gen_random_uuid(), nombre text not null, apellido text not null,
   telefono text not null, telefono_emergencia text not null, talla_playera text not null, email text unique

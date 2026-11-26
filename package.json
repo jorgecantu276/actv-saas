@@ -1,6 +1,6 @@
 {
   "name": "actv-saas",
-  "version": "0.2.0-rc.1",
+  "version": "0.2.0-rc.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,8 @@
     "test:payments:staging": "node tests/staging-payments.mjs",
     "verify": "node scripts/verify.mjs",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --test ops/tests/status.test.mjs tests/runner-history.test.mjs tests/legacy-store.test.mjs tests/candidate-composition.test.mjs"
+    "test:unit": "node --test ops/tests/status.test.mjs tests/runner-history.test.mjs tests/legacy-store.test.mjs tests/candidate-composition.test.mjs tests/staff-provisioning.test.mjs tests/staging-bindings.test.mjs",
+    "test:staging:full": "node scripts/full-staging.mjs"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^7.1.0",
@@ -33,6 +34,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "pg": "^8.23.1",
+    "supabase": "3.1.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

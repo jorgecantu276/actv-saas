@@ -78,8 +78,8 @@ try {
   for (const path of (await readdir(migrations)).filter(name => name.endsWith('.sql')).sort()) {
     await db.query(await readFile(new URL(path, migrations), 'utf8'));
   }
-  await db.query("insert into perfiles values($1,'cashier@example.invalid','Administrador','{}')", [cashier]);
-  await db.query("insert into actv_payments.staff values($1,'manager',true)", [cashier]);
+  await db.query("insert into perfiles(id,email,rol,eventos_asignados) values($1,'cashier@example.invalid','Administrador','{}')", [cashier]);
+  await db.query("insert into actv_payments.staff(user_id,role,all_events) values($1,'manager',true)", [cashier]);
   await db.query("insert into actv_payments.accounts values('00000000-0000-4000-8000-000000000ac7',false,$1,true)", [stripeAccount]);
   const race = await event(1500);
   const smallerRace = await event(6);
@@ -127,7 +127,7 @@ try {
   const stock = await staffOrder(smallerRace, 'cash', staffAthlete);
   assert.equal(stock.application_fee_amount, 0);
   const fakeStaff = randomUUID();
-  await db.query("insert into perfiles values($1,'outsider@example.invalid','Administrador','{}')", [fakeStaff]);
+  await db.query("insert into perfiles(id,email,rol,eventos_asignados) values($1,'outsider@example.invalid','Administrador','{}')", [fakeStaff]);
   assert.equal(await rpc('actv_is_payment_manager', [], fakeStaff), false);
   await assert.rejects(staffOrder(smallerRace, 'terminal', staffAthlete), /Atleta ya inscrito/);
   await assert.rejects(rpc('actv_confirm_cash', [stock.order_id, randomUUID(), 50000], cashier));
