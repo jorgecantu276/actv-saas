@@ -29,7 +29,7 @@ export default function SaleReceipt({ receipt, reprint = true, onClose }: {
     finally { setBusy(false); }
   };
   const share = () => {
-    const text = `${title}\n${receipt.event_name}\n${receipt.participants.map(p => `${p.name} ${p.surname}: ${p.folio}`).join('\n')}\n${receiptAmount(receipt)}\nRecibo: ${receipt.receipt_id}`;
+    const text = `${title}\n${receipt.event_name}\n${receipt.participants.map(p => `${[p.name, p.surname].filter(Boolean).join(' ') || 'Nombre no registrado'}: ${p.folio}`).join('\n')}\n${receiptAmount(receipt)}\nRecibo: ${receipt.receipt_id}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
   return createPortal(<>
@@ -50,7 +50,7 @@ export default function SaleReceipt({ receipt, reprint = true, onClose }: {
         <h2 className="text-xl font-bold">{title}</h2>
         <p>{receipt.event_name} · {receipt.event_date ?? 'Fecha desconocida'}</p>
         <p className="my-4 text-2xl font-black">{folios}</p>
-        {receipt.participants.map(row => <p key={row.registration_id}>{row.name} {row.surname} · {row.package}</p>)}
+        {receipt.participants.map(row => <p key={row.registration_id}>{[row.name, row.surname].filter(Boolean).join(' ') || 'Nombre no registrado'} · {row.package}{row.revision > 0 && ` · Corrección rev. ${row.revision}`}</p>)}
         <p className="my-3 font-bold">{receiptAmount(receipt)}</p>
         <p className="break-all text-xs">Recibo: {receipt.receipt_id}</p>
         {historical && <p className="my-2">La inscripción histórica conserva su folio. ACTV no tiene una captura que confirme este pago.</p>}
@@ -72,7 +72,9 @@ export default function SaleReceipt({ receipt, reprint = true, onClose }: {
         <p>Fecha: {receipt.issued_at ? new Date(receipt.issued_at).toLocaleString('es-MX') : 'Desconocida'}</p>
         <p>{receipt.event_name}<br />{receipt.event_date ?? 'Fecha del evento desconocida'}</p>
         {receipt.participants.map(row => <div key={row.registration_id} style={{ borderTop: '1px dashed black' }}>
-          <p><strong>FOLIO: {row.folio}</strong><br />{row.name} {row.surname}<br />{row.package ?? 'Paquete no registrado'}</p>
+          <p><strong>FOLIO: {row.folio}</strong><br />{[row.name, row.surname].filter(Boolean).join(' ') || 'Nombre no registrado'}<br />{row.package ?? 'Paquete no registrado'}</p>
+          {row.revision > 0 && <p>Datos corregidos · revisión {row.revision}</p>}
+          {row.provenance !== 'accepted_order' && <p style={{ fontSize: '8pt' }}>Datos históricos observados; aceptación original incompleta.</p>}
           <p>Talla: {row.shirt_size ?? '—'} · Club: {row.club ?? '—'}</p>
           <div style={{ textAlign: 'center' }}><QRCode value={row.folio} size={100} /></div>
         </div>)}

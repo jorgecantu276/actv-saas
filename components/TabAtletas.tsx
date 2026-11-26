@@ -62,32 +62,20 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: Pick<
     // =========================================================================
     // ✅ ALGORITMO INTELIGENTE: PREVENCIÓN DE ATLETAS DUPLICADOS
     // =========================================================================
-    const normalizarTexto = (txt: string) =>
-      String(txt || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-
-    const obtenerUltimos4 = (tel: string) =>
-      String(tel || '').replace(/\D/g, '').slice(-4);
-
     const telCompleto = `${codigoPaisTel}${form.telefono}`;
-    const inputNombre = normalizarTexto(form.nombre);
-    const inputApellido = normalizarTexto(form.apellido);
-    const inputUltimos4 = obtenerUltimos4(telCompleto);
-
-    // Consultamos la base de datos para asegurar que validamos con la info más reciente
-    const { data: atletasDB } = await supabase.from('atletas').select('nombre, apellido, telefono');
-
-    if (atletasDB) {
-      const atletaDuplicado = atletasDB.find((atl) => {
-        return normalizarTexto(atl.nombre) === inputNombre &&
-               normalizarTexto(atl.apellido) === inputApellido &&
-               obtenerUltimos4(atl.telefono) === inputUltimos4;
-      });
-
-      if (atletaDuplicado) {
-        alert(`⚠️ ¡Atleta ya registrado en el Padrón General!\n\nSe detectó una coincidencia exacta:\n• Nombre: ${atletaDuplicado.nombre} ${atletaDuplicado.apellido}\n• Teléfono registrado: ${atletaDuplicado.telefono}\n\nNo es necesario crearlo de nuevo, ya puedes buscarlo para inscribirlo.`);
-        setEnviando(false);
-        return; // Aborta el guardado
-      }
+    const { data: duplicate, error: duplicateError } = await supabase.rpc('actv_operations_athlete_duplicate', {
+      p_name: form.nombre, p_surname: form.apellido,
+      p_phone_last4: telCompleto.replace(/\D/g, '').slice(-4),
+    });
+    if (duplicateError) {
+      alert('No se pudo comprobar si el atleta ya existe. Consulta la búsqueda antes de volver a intentar.');
+      setEnviando(false);
+      return;
+    }
+    if (duplicate) {
+      alert('El atleta ya existe con ese nombre y teléfono. Búscalo en el padrón para inscribirlo.');
+      setEnviando(false);
+      return;
     }
     // =========================================================================
 

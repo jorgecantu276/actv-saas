@@ -14,9 +14,10 @@ export interface SaleReceipt {
   channel: string | null;
   cashier_id: string | null;
   cashier_name: string | null;
-  participants: { registration_id: string; athlete_id: string; folio: string;
-    package: string | null; amount_minor: number | null; name: string; surname: string;
-    phone: string | null; shirt_size: string | null; club: string | null }[];
+  participants: { registration_id: string; athlete_id: string | null; folio: string;
+    package: string | null; amount_minor: number | null; name: string | null; surname: string | null;
+    phone: string | null; shirt_size: string | null; club: string | null;
+    revision: number; provenance: string }[];
 }
 
 export type ReceiptIdentity = { p_order_id: string } | { p_registration_id: string }

@@ -1,8 +1,8 @@
 {
-  "version": "0.2.0-rc.3",
+  "version": "0.2.0-rc.4",
   "product": "ACTV",
   "kind": "source_candidate",
-  "sourceRef": "codex/actv-evidence-receipts-gate",
+  "sourceRef": "codex/actv-snapshots-operations",
   "productionQualified": false,
   "supported": [
     "legacy staff workflows",
@@ -13,7 +13,9 @@
     "refund recovery and reconciliation",
     "private kit evidence and durable cleanup",
     "shared server sale receipts",
-    "server sales pause and original-order recovery"
+    "server sales pause and original-order recovery",
+    "immutable registration snapshots and manager-audited corrections",
+    "unified permission-based event operations workspace"
   ],
   "excluded": [
     "new merchandise storefront",
@@ -43,7 +45,11 @@
     "20261126012100_actv_staff_lifecycle.sql",
     "20261126012200_actv_kit_evidence.sql",
     "20261126012300_actv_sales_gate.sql",
-    "20261126012400_actv_receipts.sql"
+    "20261126012400_actv_receipts.sql",
+    "20261126012500_actv_registration_snapshots.sql",
+    "20261126012600_actv_event_operations.sql",
+    "20261126012700_actv_snapshot_receipts.sql",
+    "20261126012800_actv_club_operations.sql"
   ],
   "functions": [
     "actv-checkout",

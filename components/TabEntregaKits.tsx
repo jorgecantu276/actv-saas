@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { handoverKit, recoverKitHandover, evidenceBlob, evidenceReference } from '../lib/kit-evidence';
-import { Search, Package, CheckCircle, X, Camera, ShieldAlert, Upload, PackageCheck, Eye, ChevronLeft, ChevronRight, Download, FileCode2, ChevronDown, Calendar } from 'lucide-react';
+import { Search, Package, CheckCircle, X, Camera, Upload, PackageCheck, Eye, ChevronLeft, ChevronRight, Download, FileCode2, ChevronDown, Calendar } from 'lucide-react';
 
 // ==========================================
 // COMPRESOR NATIVO DE IMÁGENES
@@ -53,14 +53,17 @@ const comprimirImagen = (file: File): Promise<File> => {
   });
 };
 
-export default function TabEntregaKits({ eventos, userRole, userId }: Pick<StaffScreenProps, 'eventos' | 'userRole' | 'userId'>) {
+export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<StaffScreenProps, 'eventos' | 'userRole' | 'userId'> & { eventId?: string }) {
   const isMounted = useClientReady();
 
   const [inscripciones, setInscripciones] = useState<Registration[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [filtroEvento, setFiltroEvento] = useState('');
   const [cargando, setCargando] = useState(true);
-  const [misEventosPermitidos, setMisEventosPermitidos] = useState<string[]>([]);
+  const [totalRegistros, setTotalRegistros] = useState(0);
+  const [loadError, setLoadError] = useState('');
+  const loadGeneration = React.useRef(0);
+  const selectedEvent = eventId || filtroEvento || eventos[0]?.id || '';
 
   const [vistaActual, setVistaActual] = useState<'pendientes' | 'entregados'>('pendientes');
 
@@ -69,7 +72,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
 
   useEffect(() => {
     setPaginaActual(1);
-  }, [busqueda, filtroEvento, vistaActual]);
+  }, [busqueda, selectedEvent, vistaActual]);
 
   const [modalEntrega, setModalEntrega] = useState<Registration | null>(null);
   const [fotoArchivo, setFotoArchivo] = useState<File | null>(null);
@@ -77,6 +80,10 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
   const [procesando, setProcesando] = useState(false);
 
   const [modalEvidencia, setModalEvidencia] = useState<string | null>(null);
+  useEffect(() => {
+    setModalEntrega(null); setFotoArchivo(null); setFotoPreview(null); setModalEvidencia(null);
+    setInscripciones([]); setTotalRegistros(0); setCargando(true);
+  }, [selectedEvent]);
 
   type CleanupStatus = { policy: { approved_days: number | null }; queue: { evidence_id: string; state: string; attempts: number; last_error: string | null }[]; unmapped_legacy: number };
   const [cleanup, setCleanup] = useState<CleanupStatus | null>(null);
@@ -113,44 +120,22 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
   };
 
   const cargarDatos = useCallback(async () => {
-    setCargando(true);
-    let eventosPermitidos: string[] = [];
-
-    if (userRole === 'Moderador' && userId) {
-      const { data: perfil } = await supabase.from('perfiles').select('eventos_asignados').eq('id', userId).single();
-      if (perfil && perfil.eventos_asignados) eventosPermitidos = perfil.eventos_asignados;
-      setMisEventosPermitidos(eventosPermitidos);
-
-      if (eventosPermitidos.length === 0) {
-        setInscripciones([]);
-        setCargando(false);
-        return;
-      }
-    }
-
-    // Calculamos la fecha límite (hace 30 días) para filtrar automáticamente eventos viejos
-    const hace30Dias = new Date();
-    hace30Dias.setDate(hace30Dias.getDate() - 30);
-    const fechaLimite = hace30Dias.toISOString().split('T')[0];
-
-    let query = supabase.from('inscripciones').select(`
-      id, evento_id, folio_asignado, kit_entregado, foto_evidencia, paquete_comprado, created_at, actv_eligible, monto_pagado,
-      atletas (nombre, apellido, talla_playera, telefono),
-      eventos!inner (nombre_carrera, fecha)
-    `)
-    .gte('eventos.fecha', fechaLimite); // <-- FILTRO DE 30 DÍAS APLICADO
-
-    if (userRole === 'Moderador') query = query.in('evento_id', eventosPermitidos);
-
-    const { data } = await query.returns<Registration[]>();
-    if (data) setInscripciones(data);
+    const generation = ++loadGeneration.current;
+    setCargando(true); setLoadError('');
+    if (!selectedEvent) { setInscripciones([]); setTotalRegistros(0); setCargando(false); return; }
+    const { data, error } = await supabase.rpc('actv_operations_roster', {
+      p_event_id: selectedEvent, p_query: busqueda.trim(), p_offset: (paginaActual - 1) * itemsPorPagina,
+      p_limit: itemsPorPagina, p_filter: vistaActual === 'pendientes' ? 'pending' : 'delivered',
+    });
+    if (generation !== loadGeneration.current) return;
+    if (error || !data?.can_sell) { setInscripciones([]); setTotalRegistros(0); setLoadError(error?.message || 'Sin acceso actual a la entrega de kits.'); }
+    else { setInscripciones(data.rows as Registration[]); setTotalRegistros(data.total); }
     setCargando(false);
-  }, [userId, userRole]);
-
+  }, [selectedEvent, busqueda, paginaActual, vistaActual]);
   useEffect(() => {
-    void cargarDatos();
+    const timer = setTimeout(() => { void cargarDatos(); }, 180);
+    return () => { clearTimeout(timer); loadGeneration.current++; };
   }, [cargarDatos]);
-
 
   const handleCapturaFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -189,33 +174,34 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
     setFotoPreview(null);
   };
 
-  const filtradosGlobales = inscripciones.filter(i => {
-    const matchEvento = filtroEvento === '' || i.eventos?.nombre_carrera === filtroEvento;
-    const busquedaLower = busqueda.toLowerCase();
-    const matchBusqueda =
-      i.folio_asignado.toLowerCase().includes(busquedaLower) ||
-      `${i.atletas?.nombre} ${i.atletas?.apellido}`.toLowerCase().includes(busquedaLower);
-
-    const matchEstado = vistaActual === 'pendientes' ? !i.kit_entregado : i.kit_entregado;
-
-    return matchEvento && matchBusqueda && matchEstado;
-  }).sort((a, b) => {
-    if (vistaActual === 'pendientes') return a.folio_asignado.localeCompare(b.folio_asignado);
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-  });
-
-  const totalPaginas = Math.ceil(filtradosGlobales.length / itemsPorPagina);
+  const filtradosGlobales = inscripciones;
+  const totalPaginas = Math.max(1, Math.ceil(totalRegistros / itemsPorPagina));
   const indexUltimoItem = paginaActual * itemsPorPagina;
   const indexPrimerItem = indexUltimoItem - itemsPorPagina;
-  const filtradosPaginados = filtradosGlobales.slice(indexPrimerItem, indexUltimoItem);
+  const filtradosPaginados = inscripciones;
+  const eventosDropdown = eventos;
+  const exportRows = async () => {
+    const rows: Registration[] = [];
+    let expected = -1;
+    for (let offset = 0; offset < 20000; offset += 100) {
+      const { data, error } = await supabase.rpc('actv_operations_roster', {
+        p_event_id: selectedEvent, p_query: busqueda.trim(), p_offset: offset, p_limit: 100,
+        p_filter: vistaActual === 'pendientes' ? 'pending' : 'delivered',
+      });
+      if (error || !data?.can_sell) throw new Error(error?.message || 'No se autorizó la exportación.');
+      if (expected !== -1 && expected !== data.total) throw new Error('La lista cambió durante la exportación. Actualiza y reintenta.');
+      expected = data.total; rows.push(...data.rows);
+      if (rows.length >= expected) return rows;
+      if (!data.rows.length) break;
+    }
+    throw new Error('No se obtuvo la lista completa. Acota la búsqueda antes de exportar.');
+  };
 
-  const eventosDropdown = userRole === 'Moderador'
-    ? eventos.filter((ev) => misEventosPermitidos.includes(ev.id))
-    : eventos;
-
-  const exportarCSV = () => {
+  const exportarCSV = async () => {
+    try {
+    const exportados = await exportRows();
     const cabeceras = ['Folio', 'Corredor', 'Evento', 'Talla', 'Paquete', 'Estado', 'Evidencia privada'];
-    const filas = filtradosGlobales.map(i => [
+    const filas = exportados.map(i => [
       i.folio_asignado,
       `${i.atletas?.nombre || ''} ${i.atletas?.apellido || ''}`,
       i.eventos?.nombre_carrera || '',
@@ -224,23 +210,27 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
       i.kit_entregado ? 'Entregado' : 'Pendiente',
       i.foto_evidencia ? 'Disponible con acceso autorizado' : 'Sin Evidencia'
     ]);
-    const csvContent = [cabeceras.join(','), ...filas.map(r => r.map(f => `"${String(f ?? '')}"`).join(','))].join('\n');
+    const csvContent = [cabeceras.join(','), ...filas.map(r => r.map(f => `"${String(f ?? '').replaceAll('"', '""')}"`).join(','))].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url; link.setAttribute('download', `Reporte_Entregas_ACTV.csv`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
+    } catch (error) { alert(error instanceof Error ? error.message : 'No se completó la exportación.'); }
   };
 
-  const exportarXML = () => {
+  const exportarXML = async () => {
+    try {
+    const exportados = await exportRows();
+    const escapeXML = (value: unknown) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<reporte_entregas>\n';
-    filtradosGlobales.forEach(i => {
+    exportados.forEach(i => {
       xml += `  <registro>\n`;
-      xml += `    <folio>${i.folio_asignado}</folio>\n`;
-      xml += `    <corredor>${i.atletas?.nombre || ''} ${i.atletas?.apellido || ''}</corredor>\n`;
-      xml += `    <evento>${i.eventos?.nombre_carrera || ''}</evento>\n`;
-      xml += `    <talla>${i.atletas?.talla_playera || ''}</talla>\n`;
-      xml += `    <paquete>${i.paquete_comprado || ''}</paquete>\n`;
+      xml += `    <folio>${escapeXML(i.folio_asignado)}</folio>\n`;
+      xml += `    <corredor>${escapeXML(i.atletas?.nombre || '')} ${escapeXML(i.atletas?.apellido || '')}</corredor>\n`;
+      xml += `    <evento>${escapeXML(i.eventos?.nombre_carrera || '')}</evento>\n`;
+      xml += `    <talla>${escapeXML(i.atletas?.talla_playera || '')}</talla>\n`;
+      xml += `    <paquete>${escapeXML(i.paquete_comprado || '')}</paquete>\n`;
       xml += `    <estado>${i.kit_entregado ? 'Entregado' : 'Pendiente'}</estado>\n`;
       xml += `    <evidencia>${i.foto_evidencia ? 'Disponible con acceso autorizado' : 'Sin Evidencia'}</evidencia>\n`;
       xml += `  </registro>\n`;
@@ -250,7 +240,8 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url; link.setAttribute('download', `Reporte_Entregas_ACTV.xml`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
+    } catch (error) { alert(error instanceof Error ? error.message : 'No se completó la exportación.'); }
   };
 
   return (
@@ -288,14 +279,6 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
           <p>Referencias históricas por revisar: {cleanup?.unmapped_legacy ?? '…'}. Trabajos de limpieza: {cleanup?.queue.length ?? 0}.</p>
           {cleanup?.queue.filter(q => q.state !== 'done').map(q => <p key={q.evidence_id} className="mt-2 text-amber-800">{q.evidence_id}: {q.state}, intentos {q.attempts}{q.last_error ? ` · ${q.last_error}` : ''}</p>)}
         </details>}
-
-        {/* ALERTA MODERADOR SIN EVENTOS */}
-        {userRole === 'Moderador' && misEventosPermitidos.length === 0 && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 p-5 rounded-2xl flex items-center mt-6 shadow-sm">
-            <ShieldAlert className="w-5 h-5 mr-3 text-amber-500 flex-shrink-0"/>
-            <p className="text-sm font-bold">No tienes carreras asignadas para entregar kits en este momento.</p>
-          </div>
-        )}
 
         {/* BOTONES DE VISTA (PENDIENTES VS ENTREGADOS) */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mt-6">
@@ -342,17 +325,19 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
             <Package className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
             <select
               className="w-full bg-white border border-slate-200 p-3.5 pl-11 rounded-xl outline-none text-sm text-slate-900 font-bold shadow-sm appearance-none cursor-pointer focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
-              value={filtroEvento}
+              value={selectedEvent}
+              disabled={Boolean(eventId)}
               onChange={(e) => setFiltroEvento(e.target.value)}
             >
-              <option value="">Todas las carreras</option>
-              {eventosDropdown.map((ev) => <option key={ev.id} value={ev.nombre_carrera}>{ev.nombre_carrera}</option>)}
+              <option value="">Selecciona una carrera</option>
+              {eventosDropdown.map((ev) => <option key={ev.id} value={ev.id}>{ev.nombre_carrera}</option>)}
             </select>
             <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
           </div>
         </div>
       </div>
 
+      {loadError && <p role="alert" className="rounded bg-amber-50 p-4 text-amber-900">{loadError}</p>}
       {cargando ? (
         <div className="py-20 text-center text-slate-400 font-bold tracking-widest uppercase text-xs">Cargando base de datos...</div>
       ) : (
@@ -374,7 +359,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
                 </div>
 
                 <div className="mb-5">
-                  <h4 className="font-bold text-slate-900 leading-tight text-lg">{i.atletas?.nombre} {i.atletas?.apellido}</h4>
+                  <h4 className="font-bold text-slate-900 leading-tight text-lg">{[i.atletas?.nombre, i.atletas?.apellido].filter(Boolean).join(' ') || 'Nombre no registrado'}</h4>
                   <p className="text-[11px] font-medium text-slate-500 uppercase mt-1.5 line-clamp-1 flex items-center">
                     <Calendar className="w-3 h-3 mr-1"/> {i.eventos?.nombre_carrera}
                   </p>
@@ -382,7 +367,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
                 </div>
 
                 <div className="flex gap-2 mb-5 text-xs font-bold">
-                  <span className="bg-slate-50 text-slate-600 px-2.5 py-1.5 rounded-lg border border-slate-200">Talla: <span className="text-slate-900">{i.atletas?.talla_playera}</span></span>
+                  <span className="bg-slate-50 text-slate-600 px-2.5 py-1.5 rounded-lg border border-slate-200">Talla: <span className="text-slate-900">{i.atletas?.talla_playera ?? 'No registrada'}</span></span>
                   <span className="bg-slate-50 text-slate-600 px-2.5 py-1.5 rounded-lg border border-slate-200 line-clamp-1">{i.paquete_comprado}</span>
                 </div>
 
@@ -410,10 +395,10 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
           </div>
 
           {/* PAGINACIÓN */}
-          {filtradosGlobales.length > itemsPorPagina && (
+          {totalRegistros > itemsPorPagina && (
             <div className="flex flex-col sm:flex-row justify-between items-center mt-8 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm gap-4">
               <p className="text-xs text-slate-500 font-bold">
-                Mostrando <span className="text-slate-900">{indexPrimerItem + 1}</span> a <span className="text-slate-900">{Math.min(indexUltimoItem, filtradosGlobales.length)}</span> de <span className="text-orange-600">{filtradosGlobales.length}</span> registros
+                Mostrando <span className="text-slate-900">{indexPrimerItem + 1}</span> a <span className="text-slate-900">{Math.min(indexUltimoItem, totalRegistros)}</span> de <span className="text-orange-600">{totalRegistros}</span> registros
               </p>
               <div className="flex gap-2">
                 <button

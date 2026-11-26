@@ -59,7 +59,12 @@ try {
   assertions += 2;
 
   const day = (await db.query("select ((now() at time zone 'America/Matamoros')::date+1)::text as day")).rows[0].day;
-  const race = await rpc('actv_create_organizer_event', ['Synthetic portal race', day, 'portal-' + suffix, 50000, 10, '5K'], owner);
+  const raceInput = [randomUUID(), { name: 'Synthetic portal race', date: day, slug: 'portal-' + suffix,
+    price: 500, package_name: 'Individual', capacity: 10, distance: '5K', description: '',
+    live_mode: false, online_enabled: false, folio_start: 1 }];
+  const race = await rpc('actv_operations_save_event', raceInput, owner);
+  await denied('actv_create_organizer_event', ['Retired implicit-mode writer', day, 'retired-' + suffix, 50000, 10, '5K'], owner);
+  await denied('actv_operations_save_event', [randomUUID(), { ...raceInput[1], slug: 'unverified-new-' + suffix }], unverified);
   const detail = await rpc('actv_organizer_event_detail', [race.event_id], owner);
   assert.equal(detail.event_id, race.event_id);
   assert.equal(detail.distance, '5K');

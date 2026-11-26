@@ -4,13 +4,12 @@ import type { Session } from '@supabase/supabase-js';
 import { ArrowLeft, ArrowRight, ArrowUpRight, LogOut, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AccountEntry } from '@/app/_pagos/account-entry';
 import { supabase } from '@/lib/supabase';
 import { goToStripe, paymentFunction, PaymentsError } from '../_pagos/api';
 import { PublicSite } from '../_pagos/public-site';
 import { PaymentAlert } from '../_pagos/ui';
-import EventPanel from './event-panel';
 import styles from './organizers.module.css';
 
 const { primaryButton, outlineButton, paymentInput } = styles;
@@ -66,6 +65,8 @@ function organizerHomeError(message: string, code: string | undefined) {
 
 function OrganizerHome() {
   const router = useRouter();
+  const createIdentity = useRef<string>('');
+  useEffect(() => { createIdentity.current = crypto.randomUUID(); }, []);
   const [profile, setProfile] = useState<OrganizerHomeData | null>(null);
   const [organizerName, setOrganizerName] = useState('');
   const [eventName, setEventName] = useState('');
@@ -171,20 +172,18 @@ function OrganizerHome() {
     setBusy(true);
     setError('');
     try {
-      const { data, error } = await supabase.rpc('actv_create_organizer_event', {
-        p_name: name,
-        p_date: date,
-        p_slug: slug,
-        p_price: price,
-        p_capacity: capacity,
-        p_distance: distance,
+      const { data, error } = await supabase.rpc('actv_operations_save_event', {
+        p_event_id: createIdentity.current,
+        p_values: { name, date, slug, price: price / 100, capacity,
+          distance: distance || 'Por confirmar', package_name: 'Individual',
+          live_mode: form.get('mode') === 'live', online_enabled: false, folio_start: 1 },
       });
       const eventId = (data as OrganizerEvent | null)?.event_id;
       if (error || !eventId || !isEventUuid(eventId)) {
         setError(organizerHomeError('No se pudo crear el evento. Revisa la fecha y los datos.', error?.code));
         return;
       }
-      router.push('/organizadores?evento=' + encodeURIComponent(eventId));
+      router.push('/operaciones?evento=' + encodeURIComponent(eventId));
     } catch {
       setError('No se pudo crear el evento. Intenta de nuevo.');
     } finally {
@@ -270,6 +269,11 @@ function OrganizerHome() {
                   inputMode="numeric" required disabled={busy || loading} />
               </label>
             </div>
+            <label>Entorno de cobro
+              <select className={paymentInput} name="mode" defaultValue="" required disabled={busy || loading}>
+                <option value="" disabled>Selecciona el entorno</option><option value="test">Pruebas</option><option value="live">Real</option>
+              </select>
+            </label>
             <details className={styles.address}>
               <summary>Editar dirección de inscripción</summary>
               <label>Enlace público de la carrera
@@ -463,10 +467,10 @@ export default function Organizers({ initialEventId, shouldResume, linkFailed }:
             {viewingEvent && detail && (
               <>
                 <nav className={styles.sections} aria-label="Secciones de la carrera">
-                  <a href="#inscritos">Inscritos</a>
+                  <Link href={`/operaciones?evento=${eventId}`}>Operar carrera</Link>
                   <a href="#inscripcion-en-linea">Inscripción en línea</a>
                 </nav>
-                <EventPanel key={session.user.id + ':' + eventId} eventId={eventId} />
+                <div className={styles.notice}><Link className={primaryButton} href={`/operaciones?evento=${eventId}`}>Abrir inscripciones, kits y asistencia</Link></div>
                 <section id="inscripcion-en-linea" className={styles.settings} aria-labelledby="checkout-title">
                   <h2 id="checkout-title" className={styles.heading}>Inscripción en línea</h2>
                   <div className={styles.settingsGrid}>

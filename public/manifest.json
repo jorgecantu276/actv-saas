@@ -1,8 +1,8 @@
 {
-  "name": "ACTV Punto de Venta",
-  "short_name": "ACTV PDV",
+  "name": "ACTV Operaciones",
+  "short_name": "ACTV",
   "description": "Sistema de gestión de logística deportiva.",
-  "start_url": "/",
+  "start_url": "/operaciones",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#2563eb",

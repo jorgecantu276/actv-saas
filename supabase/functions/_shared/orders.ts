@@ -94,7 +94,32 @@ export function parseItems(value: unknown, staff: boolean): unknown[] {
     if (!item || typeof item !== 'object' || (item.package !== 1 && item.package !== 2)) {
       throw new HttpError(400, 'invalid_participants');
     }
-    if (staff) return { athlete_id: uuid(item.athlete_id), package: item.package };
+    let consent: Record<string, string | boolean | number> | undefined;
+    if (item.consent !== undefined) {
+      if (!item.consent || typeof item.consent !== 'object' || Array.isArray(item.consent)) {
+        throw new HttpError(400, 'invalid_participants');
+      }
+      consent = {};
+      if (item.consent.policy_revision !== undefined) {
+        if (!Number.isSafeInteger(item.consent.policy_revision) || item.consent.policy_revision < 0) throw new HttpError(400, 'invalid_participants');
+        consent.policy_revision = item.consent.policy_revision;
+      }
+      for (const key of ['notice_version', 'waiver_version'] as const) {
+        if (item.consent[key] !== undefined) consent[key] = field(item.consent[key], 100);
+      }
+      for (const key of ['notice_accepted', 'waiver_accepted'] as const) {
+        if (item.consent[key] !== undefined) {
+          if (typeof item.consent[key] !== 'boolean') throw new HttpError(400, 'invalid_participants');
+          consent[key] = item.consent[key];
+        }
+      }
+    }
+    const accepted = consent ? { consent } : {};
+    if (staff) return { athlete_id: uuid(item.athlete_id), package: item.package, ...accepted };
+    const extra: Record<string, string> = {};
+    for (const [key, max] of [['fecha_nacimiento', 10], ['genero', 30], ['ciudad', 100], ['club', 120], ['email', 254]] as const) {
+      if (item[key] !== undefined) extra[key] = field(item[key], max, false);
+    }
     return {
       nombre: field(item.nombre, 100),
       apellido: field(item.apellido, 100),
@@ -102,6 +127,8 @@ export function parseItems(value: unknown, staff: boolean): unknown[] {
       telefono_emergencia: field(item.telefono_emergencia, 35),
       talla_playera: field(item.talla_playera, 30),
       package: item.package,
+      ...extra,
+      ...accepted,
     };
   });
 }

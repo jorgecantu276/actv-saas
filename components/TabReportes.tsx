@@ -48,10 +48,13 @@ const obtenerCategoria = (edad: number | null) => {
   return '70 y más';
 };
 
-export default function TabReportes({ eventos, userRole, userId }: Pick<StaffScreenProps, 'eventos' | 'userRole' | 'userId'>) {
+export default function TabReportes({ eventos, userRole }: Pick<StaffScreenProps, 'eventos' | 'userRole' | 'userId'>) {
   const isMounted = useClientReady();
 
   const [inscripciones, setInscripciones] = useState<Registration[]>([]);
+  const [serverTotal, setServerTotal] = useState(0);
+  const [loadError, setLoadError] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const [filtroEvento, setFiltroEvento] = useState('');
   const [busqueda, setBusqueda] = useState('');
@@ -72,81 +75,51 @@ export default function TabReportes({ eventos, userRole, userId }: Pick<StaffScr
 
   const [ticketReciente, setTicketReciente] = useState<SaleReceiptData | null>(null);
 
-  const consultarDatosSeguros = useCallback(async () => {
-    let eventosPermitidos: string[] = [];
-
-    if (userRole === 'Moderador' && userId) {
-      const { data: perfil } = await supabase.from('perfiles').select('eventos_asignados').eq('id', userId).single();
-      if (perfil && perfil.eventos_asignados) {
-        eventosPermitidos = perfil.eventos_asignados;
-      }
-
-
-      if (eventosPermitidos.length === 0) {
-        return { data: [], eventosPermitidos };
-      }
-    }
-
-    let query = supabase.from('inscripciones').select(`
-      *,
-      atletas (nombre, apellido, telefono, telefono_emergencia, talla_playera, club, ciudad, genero, fecha_nacimiento),
-      eventos (nombre_carrera, fecha),
-      perfiles (nombre_completo)
-    `);
-
-    if (userRole === 'Moderador') {
-      query = query.in('evento_id', eventosPermitidos);
-    }
-
-    const { data } = await query;
-    return { data, eventosPermitidos };
-  }, [userId, userRole]);
-
+  const eventId = filtroEvento || eventos[0]?.id || '';
+  const consultarDatosSeguros = useCallback(async (offset = 0, limit = 25) => {
+    if (!eventId) return { rows: [] as Registration[], total: 0 };
+    const { data, error } = await supabase.rpc('actv_operations_roster', {
+      p_event_id: eventId, p_query: busqueda, p_offset: offset, p_limit: limit, p_sort: orden,
+    });
+    if (error) throw new Error(error.message);
+    return data as { rows: Registration[]; total: number };
+  }, [eventId, busqueda, orden]);
   useEffect(() => {
     let active = true;
-    void consultarDatosSeguros().then(({ data, eventosPermitidos }) => {
+    void consultarDatosSeguros((paginaActual - 1) * inscripcionesPorPagina).then(data => {
       if (!active) return;
-      if (userRole === 'Moderador') setMisEventosPermitidos(eventosPermitidos);
-      if (data) setInscripciones(data);
-      setCargando(false);
-    });
+      setInscripciones(data.rows); setServerTotal(data.total); setLoadError('');
+      setMisEventosPermitidos(eventos.map(event => event.id)); setCargando(false);
+    }).catch(error => { if (active) { setInscripciones([]); setServerTotal(0); setLoadError(error.message); setCargando(false); } });
     return () => { active = false; };
-  }, [consultarDatosSeguros, userRole]);
-
-
-  const inscritosProcesados = inscripciones.filter(i => {
-    const coincideEvento = filtroEvento === '' || i.evento_id === filtroEvento;
-    const nombreCompleto = `${i.atletas?.nombre} ${i.atletas?.apellido}`.toLowerCase();
-    const coincideBusqueda = nombreCompleto.includes(busqueda.toLowerCase()) || i.folio_asignado.includes(busqueda);
-    return coincideEvento && coincideBusqueda;
-  });
-
-  inscritosProcesados.sort((a, b) => {
-    if (orden === 'fecha_desc') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    if (orden === 'fecha_asc') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-    if (orden === 'folio_desc') return b.folio_asignado.localeCompare(a.folio_asignado);
-    if (orden === 'folio_asc') return a.folio_asignado.localeCompare(b.folio_asignado);
-    if (orden === 'nombre_asc') return (a.atletas?.nombre || '').localeCompare(b.atletas?.nombre || '');
-    if (orden === 'nombre_desc') return (b.atletas?.nombre || '').localeCompare(a.atletas?.nombre || '');
-    return 0;
-  });
-
-  const totalPaginas = Math.ceil(inscritosProcesados.length / inscripcionesPorPagina);
+  }, [consultarDatosSeguros, paginaActual, eventos]);
+  const inscritosProcesados = inscripciones;
+  const totalPaginas = Math.ceil(serverTotal / inscripcionesPorPagina);
   const indexUltimaInscripcion = paginaActual * inscripcionesPorPagina;
   const indexPrimeraInscripcion = indexUltimaInscripcion - inscripcionesPorPagina;
-  const inscritosPaginados = inscritosProcesados.slice(indexPrimeraInscripcion, indexUltimaInscripcion);
+  const inscritosPaginados = inscritosProcesados;
+  const exportRows = async () => {
+    const rows: Registration[] = [];
+    for (let offset = 0;; offset += 100) {
+      const page = await consultarDatosSeguros(offset, 100);
+      rows.push(...page.rows);
+      if (rows.length >= page.total || !page.rows.length) return rows;
+    }
+  };
 
   // LOGICA PARA EL HISTORIAL DEL ATLETA
-  const verHistorial = (atletaId: string) => {
-    const historial = inscripciones.filter(i => i.atleta_id === atletaId);
-    const atletaData = historial.length > 0 ? historial[0].atletas : null;
-    if (atletaData) {
-      setAtletaHistorial({
-        atleta: atletaData,
-        inscripciones: historial
-      });
-      setOrdenHistorial('reciente');
-    }
+  const verHistorial = async (atletaId: string) => {
+    try {
+      const historial: Registration[] = [];
+      for (let offset = 0;; offset += 100) {
+        const { data, error } = await supabase.rpc('actv_operations_history', { p_athlete_id: atletaId, p_offset: offset, p_limit: 100 });
+        if (error) throw error;
+        const page = data as { rows: Registration[]; total: number };
+        historial.push(...page.rows);
+        if (historial.length >= page.total || !page.rows.length) break;
+      }
+      if (historial.length) { setAtletaHistorial({ atleta: historial[0].atletas, inscripciones: historial }); setOrdenHistorial('reciente'); }
+    } catch (error) { alert(String((error as { message?: string }).message ?? 'No fue posible consultar el historial.')); }
   };
 
   const historialProcesado = atletaHistorial ? [...atletaHistorial.inscripciones] : [];
@@ -161,80 +134,33 @@ export default function TabReportes({ eventos, userRole, userId }: Pick<StaffScr
   // =======================================================
   // EXPORTAR A CSV (Capitalizado y Nombres Separados)
   // =======================================================
-  const exportarCSV = () => {
-    const cabeceras = ['Folio', 'Fecha de Registro', 'Nombres', 'Apellidos', 'Fecha de Nacimiento', 'Edad al Evento', 'Categoría', 'Teléfono', 'Emergencia', 'Club/Equipo', 'Ciudad', 'Género', 'Talla', 'Paquete', 'Cajero', 'Pago', 'Carrera'];
-    const filas = inscritosProcesados.map(i => {
-      const edadNum = calcularEdadNumero(i.atletas?.fecha_nacimiento, i.eventos?.fecha);
-      const categoria = obtenerCategoria(edadNum);
-      return [
-        i.folio_asignado,
-        new Date(i.created_at).toLocaleDateString('es-MX'),
-        capitalizarNombres(i.atletas?.nombre),
-        capitalizarNombres(i.atletas?.apellido),
-        i.atletas?.fecha_nacimiento || 'N/A',
-        edadNum !== null ? edadNum : 'N/A',
-        categoria,
-        i.atletas?.telefono || '',
-        i.atletas?.telefono_emergencia || '',
-        i.atletas?.club || 'Libre',
-        i.atletas?.ciudad || '',
-        i.atletas?.genero || '',
-        i.atletas?.talla_playera || '',
-        i.paquete_comprado || '',
-        i.perfiles?.nombre_completo || 'No registrado',
-        i.monto_pagado || '0',
-        i.eventos?.nombre_carrera || ''
-      ];
-    });
-    const csvContent = [cabeceras.join(','), ...filas.map(r => r.map(f => `"${f}"`).join(','))].join('\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url; link.setAttribute('download', `Reporte_ACTV_${new Date().getTime()}.csv`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  const exportReport = async (format: 'csv' | 'xls') => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const data = await exportRows();
+      const headers = ['Folio', 'Fecha de Registro', 'Nombres', 'Apellidos', 'Fecha de Nacimiento', 'Edad al Evento', 'Categoría', 'Teléfono', 'Emergencia', 'Club/Equipo', 'Ciudad', 'Género', 'Talla', 'Paquete', 'Cajero', 'Importe registrado', 'Estado del pago', 'Carrera'];
+      const rows = data.map(i => {
+        const age = calcularEdadNumero(i.atletas?.fecha_nacimiento, i.eventos?.fecha);
+        return [i.folio_asignado, new Date(i.created_at).toLocaleDateString('es-MX'), capitalizarNombres(i.atletas?.nombre), capitalizarNombres(i.atletas?.apellido),
+          i.atletas?.fecha_nacimiento ?? 'N/A', age ?? 'N/A', obtenerCategoria(age), i.atletas?.telefono ?? '', i.atletas?.telefono_emergencia ?? '',
+          i.atletas?.club ?? '', i.atletas?.ciudad ?? '', i.atletas?.genero ?? '', i.atletas?.talla_playera ?? '', i.paquete_comprado ?? '',
+          i.perfiles?.nombre_completo ?? 'No registrado', i.monto_pagado ?? '', i.actv_eligible === null ? 'Histórico sin validar' : i.actv_eligible ? 'Vigente' : 'No vigente', i.eventos?.nombre_carrera ?? ''];
+      });
+      const text = (value: unknown) => String(value ?? '');
+      const cell = (value: unknown) => { const raw = text(value); return /^[=+@-]/.test(raw) ? "'" + raw : raw; };
+      const csv = [headers, ...rows].map(row => row.map(value => '"' + cell(value).replaceAll('"', '""') + '"').join(',')).join('\n');
+      const html = (value: unknown) => cell(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+      const table = '<html><head><meta charset="utf-8" /></head><body><table><tr>' + headers.map(value => '<th>' + html(value) + '</th>').join('') + '</tr>' + rows.map(row => '<tr>' + row.map(value => '<td>' + html(value) + '</td>').join('') + '</tr>').join('') + '</table></body></html>';
+      const blob = new Blob(['\uFEFF' + (format === 'csv' ? csv : table)], { type: format === 'csv' ? 'text/csv;charset=utf-8;' : 'application/vnd.ms-excel;charset=utf-8;' });
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url; link.download = 'Reporte_ACTV_' + Date.now() + '.' + format;
+      document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    } catch (error) { alert(error instanceof Error ? error.message : 'No se pudo exportar.'); }
+    finally { setExporting(false); }
   };
-
-  // =======================================================
-  // EXPORTAR A EXCEL (.xls) (Capitalizado y Nombres Separados)
-  // =======================================================
-  const exportarXLSX = () => {
-    let tablaHTML = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8" /></head><body><table>';
-
-    tablaHTML += '<tr><th>Folio</th><th>Fecha de Registro</th><th>Nombres</th><th>Apellidos</th><th>Fecha de Nacimiento</th><th>Edad al Evento</th><th>Categoría</th><th>Teléfono</th><th>Emergencia</th><th>Club/Equipo</th><th>Ciudad</th><th>Género</th><th>Talla</th><th>Paquete</th><th>Cajero</th><th>Pago</th><th>Carrera</th></tr>';
-
-    inscritosProcesados.forEach((i) => {
-      const edadNum = calcularEdadNumero(i.atletas?.fecha_nacimiento, i.eventos?.fecha);
-      const categoria = obtenerCategoria(edadNum);
-
-      tablaHTML += `<tr>
-        <td>${i.folio_asignado}</td>
-        <td>${new Date(i.created_at).toLocaleDateString('es-MX')}</td>
-        <td>${capitalizarNombres(i.atletas?.nombre)}</td>
-        <td>${capitalizarNombres(i.atletas?.apellido)}</td>
-        <td>${i.atletas?.fecha_nacimiento || 'N/A'}</td>
-        <td>${edadNum !== null ? edadNum : 'N/A'}</td>
-        <td>${categoria}</td>
-        <td>${i.atletas?.telefono || ''}</td>
-        <td>${i.atletas?.telefono_emergencia || ''}</td>
-        <td>${i.atletas?.club || 'Libre'}</td>
-        <td>${i.atletas?.ciudad || ''}</td>
-        <td>${i.atletas?.genero || ''}</td>
-        <td>${i.atletas?.talla_playera || ''}</td>
-        <td>${i.paquete_comprado || ''}</td>
-        <td>${i.perfiles?.nombre_completo || 'No registrado'}</td>
-        <td>${i.monto_pagado || '0'}</td>
-        <td>${i.eventos?.nombre_carrera || ''}</td>
-      </tr>`;
-    });
-
-    tablaHTML += '</table></body></html>';
-
-    const blob = new Blob([tablaHTML], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url; link.setAttribute('download', `Reporte_Excel_${new Date().getTime()}.xls`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-  };
+  const exportarCSV = () => exportReport('csv');
+  const exportarXLSX = () => exportReport('xls');
 
   const reimprimirTicket = async (inscripcion: Registration) => {
     try {
@@ -258,6 +184,8 @@ export default function TabReportes({ eventos, userRole, userId }: Pick<StaffScr
       </Link>
       {userRole === 'Administrador' && <ConciliacionCobros canMatch />}
 
+      {loadError && <p role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{loadError}</p>}
+      {exporting && <p role="status">Preparando todas las páginas de la exportación…</p>}
       {/* CABECERA ENTERPRISE */}
       <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm ring-1 ring-slate-200 no-print">
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
@@ -265,16 +193,16 @@ export default function TabReportes({ eventos, userRole, userId }: Pick<StaffScr
             <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center">
               <UserCheck className="mr-2.5 text-blue-600 w-6 h-6" /> Centro de Reportes
             </h2>
-            <p className="text-xs font-medium text-slate-500 mt-1">Audita y exporta las inscripciones de todas las carreras.</p>
+            <p className="text-xs font-medium text-slate-500 mt-1">Consulta por páginas las inscripciones de esta carrera. La exportación recorre todas las páginas de la búsqueda.</p>
           </div>
 
           <div className="flex flex-wrap gap-3 w-full xl:w-auto">
             {(userRole === 'Administrador' || userRole === 'Moderador') && (
               <>
-                <button onClick={exportarCSV} className="flex-1 md:flex-none text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2.5 rounded-xl transition-all flex items-center justify-center shadow-sm">
+                <button disabled={exporting} onClick={() => void exportarCSV()} className="flex-1 md:flex-none text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2.5 rounded-xl transition-all flex items-center justify-center shadow-sm">
                   <Download className="w-4 h-4 mr-2 text-green-600" /> Exportar CSV
                 </button>
-                <button onClick={exportarXLSX} className="flex-1 md:flex-none text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2.5 rounded-xl transition-all flex items-center justify-center shadow-sm">
+                <button disabled={exporting} onClick={() => void exportarXLSX()} className="flex-1 md:flex-none text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2.5 rounded-xl transition-all flex items-center justify-center shadow-sm">
                   <FileSpreadsheet className="w-4 h-4 mr-2 text-indigo-600" /> Exportar Excel
                 </button>
               </>
@@ -423,7 +351,7 @@ export default function TabReportes({ eventos, userRole, userId }: Pick<StaffScr
           {inscritosProcesados.length > 0 && (
             <div className="flex flex-col sm:flex-row justify-between items-center bg-white p-5 rounded-3xl ring-1 ring-slate-200 shadow-sm gap-4 no-print mt-6">
               <p className="text-xs text-slate-500 font-bold">
-                Mostrando <span className="text-slate-900">{indexPrimeraInscripcion + 1}</span> a <span className="text-slate-900">{Math.min(indexUltimaInscripcion, inscritosProcesados.length)}</span> de <span className="text-blue-600">{inscritosProcesados.length}</span> inscripciones
+                Mostrando <span className="text-slate-900">{indexPrimeraInscripcion + 1}</span> a <span className="text-slate-900">{Math.min(indexUltimaInscripcion, serverTotal)}</span> de <span className="text-blue-600">{serverTotal}</span> inscripciones
               </p>
               <div className="flex items-center gap-2">
                 <button
