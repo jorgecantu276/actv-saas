@@ -1,6 +1,6 @@
 # ACTV supported source candidate
 
-Version **0.2.0-rc.2**, November 26, 2026. This consolidates the retained newer ACTV work into one reviewed source line. The [product board](https://github.com/users/jorgecantu276/projects/2), [scope](docs/project-scope.md), [plan](docs/implementation-plan.md), and [readiness](docs/implementation-readiness.json) remain the business/acceptance references.
+Version **0.2.0-rc.3**, November 26, 2026. This adds private kit evidence with recoverable cleanup, shared server receipts and sales pause/recovery to the supported source line. The [product board](https://github.com/users/jorgecantu276/projects/2), [scope](docs/project-scope.md), [plan](docs/implementation-plan.md), and [readiness](docs/implementation-readiness.json) remain the business/acceptance references.
 
 ## Supported composition
 
@@ -29,3 +29,5 @@ For source development use `npm run dev` with isolated approved configuration. F
 The complete captured operational baseline and staff lifecycle are verified locally; actual hosted adoption/configuration, real tablet/PT210/card, full recovery, operating-policy and cutover acceptance remain separate gates. See W0–W7 and [candidate details](docs/consolidation.md). Existing private records and the original dirty checkout were preserved.
 
 The [complete staging baseline and staff lifecycle](docs/staging-baseline.md) describes the fresh catalog comparison, actual local services, atomic role/assignment management and retained-identity recovery.
+
+The [evidence, receipt and sales recovery guide](docs/evidence-receipts-recovery.md) describes the new controls, safe defaults and remaining operating decisions. Installing this candidate keeps new sales paused until an authorized manager explicitly opens them.

@@ -17,6 +17,7 @@ const fixtures = new Map<string, Record<string, unknown>>();
 const originalFetch = globalThis.fetch;
 
 const rpcArguments: Record<string, string[]> = {
+  actv_authorize_provider_attempt: ['p_order_id','p_kind','p_attempt'],
   actv_create_order: ['p_event_id','p_request_id','p_channel','p_items','p_operator','p_relay','p_buyer_email','p_live_mode'],
   actv_order_status: ['p_order_id','p_status_token','p_operator'],
   actv_attach_provider: ['p_order_id','p_account_id','p_live_mode','p_session_id','p_payment_id'],

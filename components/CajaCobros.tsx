@@ -50,6 +50,12 @@ type Shift = {
   variance?: number;
 };
 
+type SalesStatus = { paused: boolean; reason: string; can_manage: boolean; changed_at: string };
+type RecoverableOrder = StaffOrder & {
+  request_id: string; channel: Channel; cart: Cart;
+  shift_id: string | null; received: number | null; reader_attempt: string | null;
+};
+
 const currencyFormatter = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
 export const formatMoney = (amount: number) => currencyFormatter.format(amount / 100);
 
@@ -98,7 +104,7 @@ export default function CajaCobros({
   cart: Cart | null;
   estimate: number;
   onLock: (locked: boolean) => void;
-  onReceipt: (order: StaffOrder, cart: Cart, method: Channel) => void;
+  onReceipt: (order: StaffOrder, cart: Cart, method: Channel) => void | Promise<void>;
 }) {
   const key = `actv-caja-cobro:${userId}`;
   const [ready, setReady] = useState(false);
@@ -111,6 +117,10 @@ export default function CajaCobros({
   const [message, setMessage] = useState('');
   const [reader, setReader] = useState<{ status: string | null; provider: string | null }>({ status: null, provider: null });
   const [loading, setLoading] = useState(false);
+  const [sales, setSales] = useState<SalesStatus | null>(null);
+  const [pauseReason, setPauseReason] = useState('');
+  const [recent, setRecent] = useState<RecoverableOrder[]>([]);
+  const [recoveryId, setRecoveryId] = useState('');
   const busy = useRef(false);
 
   const storeDraft = useCallback((value: Draft | null) => {
@@ -126,6 +136,15 @@ export default function CajaCobros({
     const { data, error } = await supabase.rpc('actv_cash_shift');
     if (error) throw error;
     setShift(data as Shift | null);
+  }, []);
+
+  const readRecovery = useCallback(async () => {
+    const status = await supabase.rpc('actv_sales_status');
+    if (status.error) throw status.error;
+    setSales(status.data as SalesStatus);
+    const orders = await supabase.rpc('actv_staff_recent_orders', { p_limit: 30 });
+    if (orders.error) throw orders.error;
+    setRecent(orders.data as RecoverableOrder[]);
   }, []);
 
   useEffect(() => {
@@ -145,8 +164,11 @@ export default function CajaCobros({
     void readShift().catch(() => {
       if (active) setMessage('No se pudo consultar el turno de Caja. Vuelve a consultar antes de cobrar en efectivo.');
     });
+    void readRecovery().catch(() => {
+      if (active) setMessage('No se pudo consultar la pausa de ventas y las órdenes del servidor. Consulta antes de preparar otro cobro.');
+    });
     return () => { active = false; };
-  }, [key, onLock, readShift]);
+  }, [key, onLock, readShift, readRecovery]);
 
   const run = async (operation: () => Promise<void>) => {
     if (busy.current) return;
@@ -203,6 +225,10 @@ export default function CajaCobros({
 
   const prepare = () => void run(async () => {
     if (draft) return createOrder(draft);
+    await readRecovery();
+    const { data, error } = await supabase.rpc('actv_sales_status');
+    if (error) throw error;
+    if ((data as SalesStatus).paused) throw new Error('Las ventas están pausadas. Puedes consultar órdenes y recibos existentes.');
     if (!cart) return;
     if (channel === 'cash' && !shift) throw new Error('Abre un turno de Caja para cobrar en efectivo.');
     const attempt = { cart, channel, requestId: crypto.randomUUID() };
@@ -300,7 +326,7 @@ export default function CajaCobros({
     const { data, error } = await supabase.rpc('actv_staff_order_status', { p_order_id: draft.order.order_id });
     if (error) throw error;
     const current = readOrder(data as StaffOrder);
-    if (current.state === 'issued' && current.registrations?.length) onReceipt(current, draft.cart, draft.channel);
+    if (current.state === 'issued' && current.registrations?.length) await onReceipt(current, draft.cart, draft.channel);
     else if (current.state !== 'closed' && current.state !== 'voided') {
       storeDraft({ ...draft, order: current });
       setMessage('La orden no tiene folios vigentes para imprimir.');
@@ -310,7 +336,38 @@ export default function CajaCobros({
     setTender('');
     setReader({ status: null, provider: null });
     setMessage('');
+    await readRecovery();
   });
+
+  const recover = (id: string) => void run(async () => {
+    if (draft) throw new Error('Resuelve la orden que está abierta antes de recuperar otra.');
+    const { data, error } = await supabase.rpc('actv_staff_recover_order', { p_order_id: id.trim() });
+    if (error) throw error;
+    const recovered = data as RecoverableOrder;
+    storeDraft({ cart: recovered.cart, channel: recovered.channel, requestId: recovered.request_id,
+      order: readOrder(recovered), shiftId: recovered.shift_id ?? undefined,
+      received: recovered.received ?? undefined, terminalTouched: recovered.channel === 'terminal',
+      terminalRetry: recovered.reader_attempt && recovered.reader_attempt !== 'initial' ? recovered.reader_attempt : undefined });
+    setTender(recovered.received === null ? '' : (recovered.received / 100).toFixed(2));
+    setReader({ status: null, provider: null });
+    setMessage(recovered.state === 'pending' && recovered.channel === 'cash'
+      ? 'Orden recuperada sin pago confirmado. Verifica con el responsable si se recibió efectivo antes de confirmar; no cobres dos veces.'
+      : 'Orden recuperada del servidor con su identidad y folios originales. Consulta su estado antes de repetir una operación.');
+  });
+
+  const changeSales = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void run(async () => {
+      if (!sales?.can_manage) return;
+      const { data, error } = await supabase.rpc('actv_set_sales_pause', {
+        p_paused: !sales.paused, p_reason: pauseReason,
+      });
+      if (error) throw error;
+      setSales(data as SalesStatus);
+      setPauseReason('');
+      setMessage('Cambio de ventas registrado. Las confirmaciones y los recibos existentes siguen disponibles.');
+    });
+  };
 
   const order = draft?.order;
   const cash = draft?.channel === 'cash';
@@ -323,6 +380,30 @@ export default function CajaCobros({
 
   return (
     <div className="space-y-5">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="Pausa y recuperación de ventas">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black text-slate-900">{sales ? (sales.paused ? 'Ventas pausadas' : 'Ventas habilitadas') : 'Consultar estado de ventas'}</h3>
+            <p className="mt-1 text-sm text-slate-600">{sales?.reason ?? 'El servidor confirma si se pueden crear órdenes nuevas.'}</p>
+          </div>
+          <button type="button" className={secondary} disabled={loading} onClick={() => void run(readRecovery)}>Consultar ventas y órdenes</button>
+        </div>
+        {sales?.can_manage && <form className="mt-3 flex flex-wrap items-end gap-2" onSubmit={changeSales}>
+          <label className="text-xs font-semibold text-slate-700">Motivo operativo
+            <input className={field} value={pauseReason} minLength={5} maxLength={500} required onChange={event => setPauseReason(event.target.value)} />
+          </label>
+          <button type="submit" className={secondary} disabled={loading}>{sales.paused ? 'Reanudar ventas' : 'Pausar ventas nuevas'}</button>
+        </form>}
+        <p className="mt-3 text-xs text-slate-600">Recupera una orden del servidor si se perdió la sesión local. La pausa conserva cobros aceptados, conciliación y folios.</p>
+        <form className="mt-2 flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); recover(recoveryId); }}>
+          <input aria-label="Identificador de orden a recuperar" className={field} placeholder="Identificador de orden" value={recoveryId} onChange={event => setRecoveryId(event.target.value)} required />
+          <button type="submit" className={secondary} disabled={loading || Boolean(draft)}>Recuperar por identificador</button>
+        </form>
+        {!!recent.length && <ul className="mt-3 space-y-2">{recent.map(item => <li key={item.order_id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700">
+          <span className="break-all">{orderLabels[item.state]} · {formatMoney(item.amount)} · {item.channel === 'cash' ? 'Efectivo' : 'Terminal'} · {item.order_id}</span>
+          <button type="button" className={secondary} disabled={loading || Boolean(draft)} onClick={() => recover(item.order_id)}>Recuperar</button>
+        </li>)}</ul>}
+      </section>
       <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-label="Turno de caja">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -368,7 +449,7 @@ export default function CajaCobros({
 
         {message && <p role="alert" className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">{message}</p>}
         {!order && (
-          <button type="button" disabled={!ready || loading || (!draft && !cart)} className={submit} onClick={prepare}>
+          <button type="button" disabled={!ready || loading || (!draft && (!cart || !sales || sales.paused))} className={submit} onClick={prepare}>
             {draft ? 'Recuperar orden' : 'Preparar orden'}
           </button>
         )}

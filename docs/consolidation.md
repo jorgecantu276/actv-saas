@@ -1,4 +1,4 @@
-Current follow-up: source candidate 0.2.0-rc.2 adds the [complete captured staging baseline and staff lifecycle](staging-baseline.md). The record below describes the earlier 0.2.0-rc.1 consolidation and its then-open gaps.
+Current follow-up: source candidate 0.2.0-rc.3 adds [private evidence, shared receipts and sales recovery](evidence-receipts-recovery.md) over the [complete captured staging baseline and staff lifecycle](staging-baseline.md). The record below describes the earlier 0.2.0-rc.1 consolidation and its then-open gaps.
 
 # Consolidation of the November ACTV work
 

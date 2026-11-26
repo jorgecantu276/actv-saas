@@ -111,7 +111,14 @@ async function withMockFetch(fetcher: typeof fetch, run: () => Promise<void>): P
   const originalFetch = globalThis.fetch;
   try {
     for (const [name, value] of Object.entries(values)) Deno.env.set(name, value);
-    globalThis.fetch = fetcher;
+    // These provider-contract cases assume an open, already-authorized gate.
+    // sales_gate_test separately proves a denied authorization never calls Stripe.
+    globalThis.fetch = (input, init) => {
+      if (new URL(new Request(input, init).url).pathname.endsWith('actv_authorize_provider_attempt')) {
+        return Promise.resolve(Response.json(true));
+      }
+      return fetcher(input, init);
+    };
     await run();
   } finally {
     globalThis.fetch = originalFetch;

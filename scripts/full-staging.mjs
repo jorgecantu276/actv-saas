@@ -159,6 +159,9 @@ async function assertBaseline(db, catalog) {
   assert.equal(scheduled.rows[0].active, false);
   assert.equal(scheduled.rows[0].schedule, catalog.metadata.cleanup_jobs[0].schedule);
   assert.equal(scheduled.rows[0].command, catalog.metadata.cleanup_jobs[0].command);
+  const bucket = await db.query('select id,name,public,file_size_limit,allowed_mime_types from storage.buckets where id=$1',
+    [catalog.metadata.evidence_bucket.id]);
+  assert.deepEqual(bucket.rows[0], catalog.metadata.evidence_bucket, 'Captured evidence bucket configuration parity');
   return { publicTables: catalog.metadata.public_tables.length, columns: count,
     actualAuthTrigger: true, actualStorageProtection: true, legacyCleanupJob: 'registered_inactive' };
 }
@@ -168,7 +171,16 @@ async function resetApplicationOnly(db, adminDb, catalog) {
     (select count(*) from storage.objects)::int as objects`)).rows[0];
   assert.equal(counts.users, 0, 'Clean phase must contain no Auth fixtures before controlled reset');
   assert.equal(counts.objects, 0, 'Clean phase must contain no Storage fixtures before controlled reset');
+  const bucket = catalog.metadata.evidence_bucket;
+  await db.query('update storage.buckets set name=$2,public=$3,file_size_limit=$4,allowed_mime_types=$5 where id=$1',
+    [bucket.id,bucket.name,bucket.public,bucket.file_size_limit,bucket.allowed_mime_types]);
   await db.query('drop trigger if exists on_auth_user_created on auth.users');
+  // Additive candidate policies depend on application functions; remove only
+  // this candidate's named policies before recreating its owned schemas.
+  const candidatePolicies = await db.query("select policyname from pg_policies where schemaname='storage' and tablename='objects' and policyname like 'actv_evidence_%'");
+  for (const { policyname } of candidatePolicies.rows) {
+    await db.query('drop policy ' + '"' + policyname.replaceAll('"', '""') + '" on storage.objects');
+  }
   for (const policy of catalog.metadata.policies.filter(row => row.schema === 'storage')) {
     const quote = value => '"' + value.replaceAll('"', '""') + '"';
     await db.query(`drop policy if exists ${quote(policy.name)} on storage.objects`);
@@ -265,6 +277,18 @@ export async function runFullStaging() {
     await db.query("notify pgrst, 'reload schema'");
     const adoptionFingerprint = await schemaFingerprint(db);
     assert.equal(adoptionFingerprint, cleanFingerprint, 'Clean/adoption schema results must match');
+    assert.equal((await db.query('select paused from actv_payments.sales_control')).rows[0].paused, true);
+    await db.query('update actv_payments.sales_control set paused=false');
+    for (const [name, modulePath, entry] of [
+      ['private_evidence_and_cleanup', '../tests/staging/evidence-contracts.mjs', 'verifyEvidenceContracts'],
+      ['shared_sale_receipts', '../tests/staging/receipt-contracts.mjs', 'verifyReceiptContracts'],
+      ['sales_pause_and_recovery', '../tests/staging/sales-contracts.mjs', 'verifySalesContracts'],
+    ]) {
+      console.log('[full-staging] ' + name);
+      const suite = await import(modulePath);
+      const result = await suite[entry](context, retained);
+      evidence.phases.push({ name, status: 'passed', contracts: result });
+    }
     const contracts = await verifyStaffLifecycle(context, retained);
     evidence.phases.push({ name: 'retained_state_adoption_and_staff', status: 'passed', schemaFingerprintSha256: adoptionFingerprint, contracts });
     evidence.inputs = ['tests/staging/legacy-baseline.sql', 'tests/staging/baseline-catalog.json',

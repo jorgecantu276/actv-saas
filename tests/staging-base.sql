@@ -13,6 +13,16 @@ create table auth.users(id uuid primary key,email text,email_confirmed_at timest
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true),'')::uuid
 $$;
+create function auth.role() returns text language sql stable as $$
+  select current_user::text
+$$;
+-- Bounded SQL dependency fixture only. Actual Storage/API/protection contracts
+-- run separately against the complete Supabase platform in full-staging.
+create schema storage;
+create table storage.buckets(id text primary key,name text,public boolean default false,file_size_limit bigint,allowed_mime_types text[]);
+create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,metadata jsonb);
+alter table storage.objects enable row level security;
+insert into storage.buckets(id,name,public) values('evidencias_kits','evidencias_kits',true);
 grant usage on schema auth to authenticated, service_role;
 create table public.perfiles(id uuid primary key, email text not null, rol text, eventos_asignados uuid[],nombre_completo text,telefono text);
 create table public.atletas(

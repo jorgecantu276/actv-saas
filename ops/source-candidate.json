@@ -1,8 +1,8 @@
 {
-  "version": "0.2.0-rc.2",
+  "version": "0.2.0-rc.3",
   "product": "ACTV",
   "kind": "source_candidate",
-  "sourceRef": "codex/actv-staging-staff",
+  "sourceRef": "codex/actv-evidence-receipts-gate",
   "productionQualified": false,
   "supported": [
     "legacy staff workflows",
@@ -10,7 +10,10 @@
     "private Mi ACTV attendance",
     "organizer event operations",
     "cash and configured Stripe Terminal contracts",
-    "refund recovery and reconciliation"
+    "refund recovery and reconciliation",
+    "private kit evidence and durable cleanup",
+    "shared server sale receipts",
+    "server sales pause and original-order recovery"
   ],
   "excluded": [
     "new merchandise storefront",
@@ -37,7 +40,10 @@
     "20261114011600_actv_runner_organizer_portals.sql",
     "20261114011900_actv_organizer_event_detail.sql",
     "20261126012000_actv_order_recovery_origin.sql",
-    "20261126012100_actv_staff_lifecycle.sql"
+    "20261126012100_actv_staff_lifecycle.sql",
+    "20261126012200_actv_kit_evidence.sql",
+    "20261126012300_actv_sales_gate.sql",
+    "20261126012400_actv_receipts.sql"
   ],
   "functions": [
     "actv-checkout",
@@ -45,7 +51,9 @@
     "actv-stripe-terminal",
     "actv-stripe-webhook",
     "actv-stripe-reconcile",
-    "actv-admin-payments"
+    "actv-admin-payments",
+    "actv-kit-evidence",
+    "actv-evidence-cleanup"
   ],
   "configurationNames": [
     "NEXT_PUBLIC_SUPABASE_URL",
@@ -60,7 +68,8 @@
     "SUPABASE_SECRET_KEYS",
     "ACTV_STRIPE_RECONCILE_SECRET",
     "ACTV_STAFF_ORIGIN",
-    "SUPABASE_SERVICE_ROLE_KEY"
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "ACTV_EVIDENCE_CLEANUP_SECRET"
   ],
   "verification": "npm run verify",
   "evidenceIndex": ".verification/evidence-index.json",

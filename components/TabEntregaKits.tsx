@@ -6,6 +6,7 @@ import type { Registration, StaffScreenProps } from '../lib/legacy-types';
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
+import { handoverKit, recoverKitHandover, evidenceBlob, evidenceReference } from '../lib/kit-evidence';
 import { Search, Package, CheckCircle, X, Camera, ShieldAlert, Upload, PackageCheck, Eye, ChevronLeft, ChevronRight, Download, FileCode2, ChevronDown, Calendar } from 'lucide-react';
 
 // ==========================================
@@ -14,10 +15,12 @@ import { Search, Package, CheckCircle, X, Camera, ShieldAlert, Upload, PackageCh
 const comprimirImagen = (file: File): Promise<File> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la foto.'));
     reader.readAsDataURL(file);
     reader.onload = (event) => {
       const img = new Image();
       img.src = event.target?.result as string;
+      img.onerror = () => reject(new Error('El archivo no es una imagen válida.'));
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const MAX_WIDTH = 800; // Resolución ideal y ligera
@@ -33,7 +36,8 @@ const comprimirImagen = (file: File): Promise<File> => {
         canvas.width = newWidth;
         canvas.height = newHeight;
         const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        if (!ctx) { reject(new Error('No se pudo preparar la imagen.')); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         canvas.toBlob((blob) => {
           if (blob) {
@@ -74,6 +78,40 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
 
   const [modalEvidencia, setModalEvidencia] = useState<string | null>(null);
 
+  type CleanupStatus = { policy: { approved_days: number | null }; queue: { evidence_id: string; state: string; attempts: number; last_error: string | null }[]; unmapped_legacy: number };
+  const [cleanup, setCleanup] = useState<CleanupStatus | null>(null);
+  const [retentionDays, setRetentionDays] = useState('');
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const isManager = userRole === 'Administrador';
+  useEffect(() => () => { if (fotoPreview) URL.revokeObjectURL(fotoPreview); }, [fotoPreview]);
+  useEffect(() => () => { if (modalEvidencia) URL.revokeObjectURL(modalEvidencia); }, [modalEvidencia]);
+  const loadCleanup = useCallback(async () => {
+    if (!isManager) return;
+    const { data, error } = await supabase.rpc('actv_evidence_cleanup_status');
+    if (!error) setCleanup(data as CleanupStatus);
+  }, [isManager]);
+  useEffect(() => { void loadCleanup(); }, [loadCleanup]);
+  const saveRetention = async (days: number | null) => {
+    if (days !== null && (!Number.isInteger(days) || days < 1 || days > 3650)) return alert('Indica entre 1 y 3650 días.');
+    setPolicyBusy(true);
+    const { error } = await supabase.rpc('actv_evidence_policy', { p_days: days });
+    setPolicyBusy(false);
+    if (error) alert(error.message); else await loadCleanup();
+  };
+  const abrirEvidencia = async (registration: string) => {
+    try { setModalEvidencia(await evidenceBlob(registration)); }
+    catch (error) { alert(error instanceof Error ? error.message : 'Evidencia no disponible.'); }
+  };
+  const cambiarRetencion = async (registration: string) => {
+    try {
+      const evidence = await evidenceReference(registration);
+      const { error } = await supabase.rpc('actv_evidence_hold', { p_evidence: evidence.id, p_hold: !evidence.legal_hold });
+      if (error) throw error;
+      alert(evidence.legal_hold ? 'Retención legal retirada.' : 'Retención legal activada: esta foto no se elimina.');
+      await loadCleanup();
+    } catch (error) { alert(error instanceof Error ? error.message : 'No se pudo cambiar la retención.'); }
+  };
+
   const cargarDatos = useCallback(async () => {
     setCargando(true);
     let eventosPermitidos: string[] = [];
@@ -96,7 +134,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
     const fechaLimite = hace30Dias.toISOString().split('T')[0];
 
     let query = supabase.from('inscripciones').select(`
-      id, folio_asignado, kit_entregado, foto_evidencia, paquete_comprado, created_at, actv_eligible, monto_pagado,
+      id, evento_id, folio_asignado, kit_entregado, foto_evidencia, paquete_comprado, created_at, actv_eligible, monto_pagado,
       atletas (nombre, apellido, talla_playera, telefono),
       eventos!inner (nombre_carrera, fecha)
     `)
@@ -128,40 +166,13 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
       alert('Consulta conciliación antes de entregar este kit.');
       return;
     }
-    if (!fotoArchivo) return alert("Por favor toma una foto como evidencia.");
     setProcesando(true);
 
     try {
+      if (await recoverKitHandover(modalEntrega.id)) { cerrarModal(); await cargarDatos(); return; }
+      if (!fotoArchivo) { alert('Por favor toma una foto como evidencia. No hay entrega confirmada pendiente de recuperar.'); return; }
       const fotoOptimizada = await comprimirImagen(fotoArchivo);
-      const fileName = `kit_${modalEntrega.folio_asignado}_${Date.now()}.jpg`;
-      const filePath = `${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('evidencias_kits')
-        .upload(filePath, fotoOptimizada);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('evidencias_kits')
-        .getPublicUrl(filePath);
-
-      const { data: updated, error: updateError } = await supabase.from('inscripciones')
-        .update({
-          kit_entregado: true,
-          foto_evidencia: publicUrl
-        })
-        .eq('id', modalEntrega.id)
-        .or('actv_eligible.is.null,actv_eligible.eq.true')
-        .or('kit_entregado.is.null,kit_entregado.eq.false')
-        .select('id')
-        .maybeSingle();
-
-      if (updateError) throw updateError;
-      if (!updated) {
-        await supabase.storage.from('evidencias_kits').remove([filePath]);
-        throw new Error('El folio cambió de estado. Consulta la inscripción antes de entregar el kit.');
-      }
+      await handoverKit(modalEntrega.id, fotoOptimizada);
 
       cerrarModal();
       cargarDatos();
@@ -203,7 +214,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
     : eventos;
 
   const exportarCSV = () => {
-    const cabeceras = ['Folio', 'Corredor', 'Evento', 'Talla', 'Paquete', 'Estado', 'Evidencia URL'];
+    const cabeceras = ['Folio', 'Corredor', 'Evento', 'Talla', 'Paquete', 'Estado', 'Evidencia privada'];
     const filas = filtradosGlobales.map(i => [
       i.folio_asignado,
       `${i.atletas?.nombre || ''} ${i.atletas?.apellido || ''}`,
@@ -211,7 +222,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
       i.atletas?.talla_playera || '',
       i.paquete_comprado || '',
       i.kit_entregado ? 'Entregado' : 'Pendiente',
-      i.foto_evidencia || 'Sin Evidencia'
+      i.foto_evidencia ? 'Disponible con acceso autorizado' : 'Sin Evidencia'
     ]);
     const csvContent = [cabeceras.join(','), ...filas.map(r => r.map(f => `"${String(f ?? '')}"`).join(','))].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -231,7 +242,7 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
       xml += `    <talla>${i.atletas?.talla_playera || ''}</talla>\n`;
       xml += `    <paquete>${i.paquete_comprado || ''}</paquete>\n`;
       xml += `    <estado>${i.kit_entregado ? 'Entregado' : 'Pendiente'}</estado>\n`;
-      xml += `    <evidencia>${i.foto_evidencia || 'Sin Evidencia'}</evidencia>\n`;
+      xml += `    <evidencia>${i.foto_evidencia ? 'Disponible con acceso autorizado' : 'Sin Evidencia'}</evidencia>\n`;
       xml += `  </registro>\n`;
     });
     xml += '</reporte_entregas>';
@@ -258,6 +269,25 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
             Actualizar Lista
           </button>
         </div>
+
+        {isManager && <details className="mt-5 rounded-xl border border-slate-200 p-4 text-sm">
+          <summary className="font-bold cursor-pointer">Privacidad y conservación de evidencias</summary>
+          <p className="my-3">Fotos privadas. La eliminación automática requiere una política aprobada. Las fotos históricas sin fecha conocida se conservan hasta revisión; la retención legal impide eliminarlas.</p>
+          <p>Política actual: {cleanup?.policy.approved_days ? `${cleanup.policy.approved_days} días` : 'sin eliminación automática aprobada'}.</p>
+          <div className="my-3 flex flex-wrap gap-2 items-center">
+            <label>Días de conservación <input aria-label="Días de conservación" type="number" min="1" max="3650" value={retentionDays} onChange={e => setRetentionDays(e.target.value)} className="border rounded p-2 w-24" /></label>
+            <button disabled={policyBusy} onClick={() => void saveRetention(Number(retentionDays))} className="border rounded p-2">Aprobar política</button>
+            <button disabled={policyBusy} onClick={() => void saveRetention(null)} className="border rounded p-2">Pausar eliminación</button>
+            <button onClick={() => void loadCleanup()} className="border rounded p-2">Actualizar estado</button>
+            <button onClick={async () => {
+              const origin = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).origin;
+              const { error } = await supabase.rpc('actv_evidence_adopt_legacy', { p_origin: origin });
+              if (error) alert(error.message); else await loadCleanup();
+            }} className="border rounded p-2">Vincular fotos históricas de este servidor</button>
+          </div>
+          <p>Referencias históricas por revisar: {cleanup?.unmapped_legacy ?? '…'}. Trabajos de limpieza: {cleanup?.queue.length ?? 0}.</p>
+          {cleanup?.queue.filter(q => q.state !== 'done').map(q => <p key={q.evidence_id} className="mt-2 text-amber-800">{q.evidence_id}: {q.state}, intentos {q.attempts}{q.last_error ? ` · ${q.last_error}` : ''}</p>)}
+        </details>}
 
         {/* ALERTA MODERADOR SIN EVENTOS */}
         {userRole === 'Moderador' && misEventosPermitidos.length === 0 && (
@@ -362,10 +392,11 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
                       <Package className="w-4 h-4 mr-2"/> Entregar Kit
                     </button>
                   ) : (
-                    <button onClick={() => setModalEvidencia(i.foto_evidencia)} className="w-full py-3.5 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700 rounded-xl text-sm font-bold transition-all active:scale-95 shadow-sm flex justify-center items-center">
-                      <Eye className="w-4 h-4 mr-2"/> Ver Evidencia
+                    <button disabled={!i.foto_evidencia} onClick={() => void abrirEvidencia(i.id)} className="w-full py-3.5 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700 rounded-xl text-sm font-bold transition-all active:scale-95 shadow-sm flex justify-center items-center disabled:opacity-50">
+                      <Eye className="w-4 h-4 mr-2"/> {i.foto_evidencia ? 'Ver Evidencia' : 'Sin evidencia conservada'}
                     </button>
                   )}
+                  {isManager && i.foto_evidencia && <button onClick={() => void cambiarRetencion(i.id)} className="w-full mt-2 border rounded-xl p-2 text-xs font-bold">Consultar / cambiar retención legal</button>}
                 </div>
               </div>
             ))}
@@ -455,8 +486,8 @@ export default function TabEntregaKits({ eventos, userRole, userId }: Pick<Staff
                 )}
               </div>
 
-              <button type="submit" disabled={procesando || !fotoArchivo} className="w-full bg-slate-900 hover:bg-black text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-slate-900/20 text-sm flex justify-center items-center transition-all active:scale-[0.98] disabled:opacity-50">
-                {procesando ? 'Guardando...' : <><CheckCircle className="w-4 h-4 mr-2" /> Finalizar Entrega</>}
+              <button type="submit" disabled={procesando} className="w-full bg-slate-900 hover:bg-black text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-slate-900/20 text-sm flex justify-center items-center transition-all active:scale-[0.98] disabled:opacity-50">
+                {procesando ? 'Consultando / guardando...' : <><CheckCircle className="w-4 h-4 mr-2" /> {fotoArchivo ? 'Finalizar Entrega' : 'Recuperar entrega pendiente'}</>}
               </button>
             </form>
           </div>
