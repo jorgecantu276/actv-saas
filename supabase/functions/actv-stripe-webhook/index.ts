@@ -1,6 +1,41 @@
-import { boundedBody, env, handler, HttpError, liveMode } from '../_shared/http.ts';
-import { completeEvent, eventTypes, noteFailedEvent, recordEvent } from '../_shared/stripe-events.ts';
+import { boundedBody, env, handler, HttpError, liveMode, rpc } from '../_shared/http.ts';
+import {
+  acknowledgeEvent,
+  applyEvent,
+  completeEvent,
+  type EventRetry,
+  eventTypes,
+  noteFailedEvent,
+  recordEvent,
+  type StoredEvent,
+} from '../_shared/stripe-events.ts';
 import { providerOrderId, Stripe, stripeClient, stripeErrorCode } from '../_shared/stripe.ts';
+
+type BackgroundGlobal = typeof globalThis & { EdgeRuntime?: { waitUntil: (work: Promise<void>) => void } };
+
+async function processReceivedEvent(stripe: Stripe, notice: StoredEvent) {
+  const identity = {
+    p_live_mode: notice.live_mode,
+    p_account_id: notice.account_id,
+    p_event_id: notice.event_id,
+  };
+  try {
+    const claimed = await rpc<EventRetry | null>('actv_claim_received_stripe_event', identity);
+    if (!claimed) return;
+    let failure: string | null = null;
+    try {
+      await applyEvent(stripe, claimed);
+    } catch (error) {
+      failure = stripeErrorCode(error);
+    }
+    const acknowledged = await acknowledgeEvent(claimed, failure);
+    if (acknowledged && failure) {
+      console.error(JSON.stringify({ component: 'actv-stripe-webhook', code: failure }));
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ component: 'actv-stripe-webhook', code: stripeErrorCode(error) }));
+  }
+}
 
 export async function signedEvent(stripe: Stripe, raw: string, signature: string, secret: string) {
   try {
@@ -46,6 +81,11 @@ export const webhookHandler = handler('actv-stripe-webhook', async (request) => 
   };
   const result = await recordEvent(record);
   if (result.processed) return { received: true, duplicate: true };
+  const runtime = (globalThis as BackgroundGlobal).EdgeRuntime;
+  if (runtime?.waitUntil) {
+    runtime.waitUntil(processReceivedEvent(stripe, record));
+    return { received: true, queued: true };
+  }
   try {
     await completeEvent(stripe, record);
   } catch (error) {

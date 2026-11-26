@@ -13,7 +13,7 @@ async function verifyManager(accessToken: string) {
   if (error || data !== true) throw new Error('Acción reservada para administración.');
 }
 
-export async function crearAccesoUsuario(formData: any, accessToken: string) {
+export async function crearAccesoUsuario(formData: { email: string; password: string; rol: string; nombre_completo: string; telefono: string; eventos_asignados: string[] }, accessToken: string) {
   try {
     await verifyManager(accessToken);
     // 1. Creamos el usuario en Supabase Auth con metadata para el Trigger
@@ -21,7 +21,7 @@ export async function crearAccesoUsuario(formData: any, accessToken: string) {
       email: formData.email,
       password: formData.password,
       email_confirm: true,
-      user_metadata: { 
+      user_metadata: {
         rol: formData.rol, // Ej: "PDV ACTV", "moderador", "admin"
         nombre_completo: formData.nombre_completo,
         telefono: formData.telefono // Opcional: también puedes incluir teléfono
@@ -45,8 +45,8 @@ export async function crearAccesoUsuario(formData: any, accessToken: string) {
     if (profileError) throw new Error(profileError.message);
 
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -54,14 +54,14 @@ export async function actualizarContrasenaUsuario(uid: string, nuevaContrasena: 
   try {
     await verifyManager(accessToken);
     // Usamos el supabaseAdmin que ya importaste arriba para tener permisos de administrador absolutos
-    const { data, error } = await supabaseAdmin.auth.admin.updateUserById(uid, {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(uid, {
       password: nuevaContrasena
     });
 
     if (error) throw error;
-    
+
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

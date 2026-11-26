@@ -24,6 +24,7 @@ export function readinessMetrics(record) {
     owners: { named: Object.values(record.named_owners).filter(value => typeof value === 'string' && value.trim()).length, total: Object.keys(record.named_owners).length },
     candidateSha: record.candidate_sha, evidenceIndex: record.release_evidence_index,
     productCompletionPercent: null, evidenceValidation: 'NOT_PERFORMED',
+    sourceCandidate: record.source_consolidation ?? null,
   };
 }
 

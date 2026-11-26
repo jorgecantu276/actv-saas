@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.actv-stripe-reconcile]
 verify_jwt = false
+
+[functions.actv-admin-payments]
+verify_jwt = false
+
+[functions.actv-mercadopago-webhook]
+verify_jwt = false

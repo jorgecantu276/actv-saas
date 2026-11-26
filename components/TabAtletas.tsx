@@ -1,17 +1,19 @@
 'use client';
 
+
+import type { Club, StaffScreenProps } from '../lib/legacy-types';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { User, Calendar, MapPin, Phone, Mail, ShieldCheck, Timer, Award } from 'lucide-react';
 
-export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) {
+export default function TabAtletas({ recargarDatos, clubes = [], userId }: Pick<StaffScreenProps, 'recargarDatos' | 'clubes' | 'userId'>) {
   const [enviando, setEnviando] = useState(false);
   const [codigoPaisTel, setCodigoPaisTel] = useState('+52');
   const [codigoPaisEme, setCodigoPaisEme] = useState('+52');
   const [aceptoTerminos, setAceptoTerminos] = useState(false);
-  
+
   // Nuevo estado para la lista completa de clubes directos de Supabase
-  const [clubesDB, setClubesDB] = useState<any[]>([]);
+  const [clubesDB, setClubesDB] = useState<Pick<Club, 'id' | 'nombre'>[]>([]);
 
   const [form, setForm] = useState({
     nombre: '',
@@ -60,10 +62,10 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) 
     // =========================================================================
     // ✅ ALGORITMO INTELIGENTE: PREVENCIÓN DE ATLETAS DUPLICADOS
     // =========================================================================
-    const normalizarTexto = (txt: string) => 
+    const normalizarTexto = (txt: string) =>
       String(txt || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
-    const obtenerUltimos4 = (tel: string) => 
+    const obtenerUltimos4 = (tel: string) =>
       String(tel || '').replace(/\D/g, '').slice(-4);
 
     const telCompleto = `${codigoPaisTel}${form.telefono}`;
@@ -75,9 +77,9 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) 
     const { data: atletasDB } = await supabase.from('atletas').select('nombre, apellido, telefono');
 
     if (atletasDB) {
-      const atletaDuplicado = atletasDB.find((atl: any) => {
-        return normalizarTexto(atl.nombre) === inputNombre && 
-               normalizarTexto(atl.apellido) === inputApellido && 
+      const atletaDuplicado = atletasDB.find((atl) => {
+        return normalizarTexto(atl.nombre) === inputNombre &&
+               normalizarTexto(atl.apellido) === inputApellido &&
                obtenerUltimos4(atl.telefono) === inputUltimos4;
       });
 
@@ -89,11 +91,11 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) 
     }
     // =========================================================================
 
-    const datosParaEnviar: any = { 
-      ...form, 
+    const datosParaEnviar: Record<keyof typeof form, string | null> & { usuario_id: string | null } = {
+      ...form,
       telefono: telCompleto,
       telefono_emergencia: `${codigoPaisEme}${form.telefono_emergencia}`,
-      usuario_id: userId 
+      usuario_id: userId
     };
 
     // Limpiamos campos opcionales vacíos para evitar errores de tipo en Supabase
@@ -134,7 +136,7 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) 
   // =========================================================================
   // FIX BLINDADO: Ordenamiento inteligente de la A a la Z incluyendo números
   // =========================================================================
-  const listaClubesFinal = [...(clubesDB.length > 0 ? clubesDB : clubes)].sort((a: any, b: any) => {
+  const listaClubesFinal = [...(clubesDB.length > 0 ? clubesDB : clubes)].sort((a, b) => {
     const nombreA = String(a?.nombre || '').trim();
     const nombreB = String(b?.nombre || '').trim();
     return nombreA.localeCompare(nombreB, 'es', { numeric: true, sensitivity: 'base' });
@@ -142,15 +144,15 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) 
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-10">
-      
+
       <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm ring-1 ring-slate-200">
-        
+
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-slate-100 pb-5 gap-4">
           <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center">
             <User className="mr-2.5 text-slate-900 w-6 h-6" /> Registro de Atleta
           </h2>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* ==========================================
               DATOS PRINCIPALES
@@ -160,7 +162,7 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) 
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider pl-1">Nombre(s) *</label>
               <input type="text" name="nombre" required value={form.nombre} onChange={handleChange} placeholder="Ej. Juan Carlos" className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none text-slate-900 focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-sm font-medium placeholder:text-slate-400" />
             </div>
-            
+
             <div className="space-y-1.5">
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider pl-1">Apellido(s) *</label>
               <input type="text" name="apellido" required value={form.apellido} onChange={handleChange} placeholder="Ej. Pérez Gómez" className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none text-slate-900 focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-sm font-medium placeholder:text-slate-400" />
@@ -176,7 +178,7 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) 
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center"><Award className="w-3.5 h-3.5 mr-1.5"/> Club / Equipo *</label>
               <select name="club" required value={form.club} onChange={handleChange} className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none text-slate-900 focus:border-slate-400 transition-all text-sm font-semibold appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2394a3b8%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_16px_center] bg-[length:16px_16px] pr-10 cursor-pointer">
                 <option value="Libre">Libre</option>
-                {listaClubesFinal.map((c: any) => (
+                {listaClubesFinal.map((c) => (
                   <option key={c.id} value={c.nombre}>{c.nombre}</option>
                 ))}
               </select>
@@ -291,10 +293,10 @@ export default function TabAtletas({ recargarDatos, clubes = [], userId }: any) 
               </div>
             </div>
           </div>
-          
-          <button 
-            type="submit" 
-            disabled={enviando || !aceptoTerminos} 
+
+          <button
+            type="submit"
+            disabled={enviando || !aceptoTerminos}
             className={`w-full text-white font-bold py-4 rounded-xl shadow-md transition-all text-sm flex justify-center items-center mt-6 active:scale-[0.99] ${aceptoTerminos ? 'bg-slate-900 hover:bg-black' : 'bg-slate-300 cursor-not-allowed shadow-none'}`}
           >
             {aceptoTerminos ? (enviando ? 'Guardando...' : 'Confirmar y Registrar Atleta') : 'Acepta los términos para registrar'}

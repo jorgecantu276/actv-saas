@@ -16,10 +16,13 @@ const order = {
   state: 'pending',
   channel: 'online',
   amount: 1000,
+  application_fee_amount: 0,
+  buyer_email: 'runner@example.test',
   currency: 'mxn',
   account_id: account,
   live_mode: false,
   reader_id: null,
+  created_at: new Date().toISOString(),
   expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
   items: [{ name: 'Individual', amount: 1000 }],
   provider_session_id: sessionId,
@@ -167,7 +170,17 @@ Deno.test('webhook uses the raw body and rejects changes or stale signatures', a
 });
 
 Deno.test('public checkout uses DB price, Stripe connected account, idempotency, and attaches before returning URL', async () => {
+  let firstBinding = true;
+  let linkedSession: string | null = null;
   const calls: string[] = [];
+  const providerParameters: string[] = [];
+  const openSession = {
+    ...session,
+    status: 'open',
+    payment_status: 'unpaid',
+    payment_intent: null,
+    url: 'https://checkout.stripe.com/c/pay/test',
+  };
   await withMockFetch(async (input, init) => {
     const req = new Request(input, init);
     const path = new URL(req.url).pathname;
@@ -176,52 +189,76 @@ Deno.test('public checkout uses DB price, Stripe connected account, idempotency,
       const body = await req.json();
       assert(body.p_items[0].package === 1 && !('amount' in body.p_items[0]), 'client price discarded');
       assert(body.p_request_id === requestId, 'client order idempotency');
-      return Response.json({ ...order, provider_session_id: null });
+      return Response.json({ ...order, provider_session_id: linkedSession });
     }
     if (req.url.startsWith('https://api.stripe.com/')) {
+      if (req.method === 'GET') {
+        assert(linkedSession === sessionId, 'existing Checkout identity was persisted before the response');
+        return Response.json(openSession);
+      }
       const form = new URLSearchParams(await req.text());
       assert(req.headers.get('stripe-account') === account, 'connected charge');
       assert(req.headers.get('idempotency-key') === `actv-checkout-${orderId}`, 'provider idempotency');
       assert(form.get('line_items[0][price_data][unit_amount]') === '1000', 'authoritative amount');
       assert(form.get('allowed_payment_method_types[0]') === 'card', 'explicit card method');
+      assert(form.get('adaptive_pricing[enabled]') === 'false', 'keep Checkout prices in MXN');
+      assert(form.get('customer_email') === order.buyer_email, 'use persisted email on every retry');
       const returnUrl = new URL(form.get('success_url')!);
       assert(
         returnUrl.searchParams.get('orden') === orderId && returnUrl.hash === `#token=${orderToken}`,
         'private status token in fragment',
       );
-      return Response.json({
-        ...session,
-        status: 'open',
-        payment_intent: null,
-        url: 'https://checkout.stripe.com/c/pay/test',
-      });
+      providerParameters.push(form.toString());
+      return Response.json(openSession);
     }
     if (path.endsWith('actv_attach_provider')) {
       assert((await req.json()).p_session_id === sessionId, 'bind exact Stripe session');
+      if (firstBinding) {
+        firstBinding = false;
+        return Response.json({ code: '08006' }, { status: 503 });
+      }
+      linkedSession = sessionId;
       return Response.json(order);
     }
     throw new Error(`Unexpected path ${path}`);
   }, async () => {
-    const response = await checkoutHandler(
-      request('http://localhost/checkout', {
-        action: 'start',
-        eventId: orderId,
-        buyerEmail: 'runner@example.test',
-        idempotencyKey: requestId,
-        participants: [{
-          nombre: 'Runner',
-          apellido: 'Test',
-          telefono: '123456',
-          telefono_emergencia: '123456',
-          talla_playera: 'M',
-          package: 1,
-          amount: 1,
-        }],
-      }),
+    const start = (email: string) =>
+      checkoutHandler(
+        request('http://localhost/checkout', {
+          action: 'start',
+          eventId: orderId,
+          buyerEmail: email,
+          idempotencyKey: requestId,
+          participants: [{
+            nombre: 'Runner',
+            apellido: 'Test',
+            telefono: '123456',
+            telefono_emergencia: '123456',
+            talla_playera: 'M',
+            package: 1,
+            amount: 1,
+          }],
+        }),
+      );
+    const first = await start('RUNNER@example.test');
+    const failure = await first.json();
+    assert(
+      first.status === 503 && !failure.checkoutUrl && !failure.orderToken,
+      'no links or tokens before binding',
     );
+    const response = await start('runner@example.test');
     const data = await response.json();
     assert(response.ok && data.checkoutUrl && data.folios.length === 0, 'no folio from Checkout creation');
-    assert(calls.join(',') === 'actv_create_order,sessions,actv_attach_provider', 'binding precedes output');
+    assert(
+      providerParameters.length === 2 && providerParameters[0] === providerParameters[1],
+      'exact Stripe request retried',
+    );
+    assert(
+      calls.join(',') ===
+        'actv_create_order,sessions,actv_attach_provider,actv_create_order,sessions,actv_attach_provider,' +
+          sessionId,
+      'same Checkout attached and retrieved before output',
+    );
   });
 });
 
@@ -317,6 +354,172 @@ Deno.test('a preexisting full refund is recorded before capture confirmation', a
     const response = await webhookHandler(await webhookEvent({ id: sessionId, metadata }));
     assert(response.ok && writes.join(',') === 'refund,capture', 'SQL sees refund before eligibility check');
   });
+});
+
+Deno.test('hosted webhook acknowledges the persisted event before retrieving Stripe', async () => {
+  const scope = globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil: (work: Promise<void>) => void };
+  };
+  const previous = scope.EdgeRuntime;
+  let task: Promise<void> | undefined;
+  let recorded = false;
+  let finalized = false;
+  let allowStripe!: () => void;
+  const stripeReady = new Promise<void>((resolve) => {
+    allowStripe = resolve;
+  });
+  scope.EdgeRuntime = {
+    waitUntil: (work) => {
+      task = work;
+    },
+  };
+
+  try {
+    await withMockFetch(async (input, init) => {
+      const request = new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (path.endsWith('actv_record_stripe_event')) {
+        recorded = true;
+        return Response.json({ processed: false });
+      }
+      if (path.endsWith('actv_claim_received_stripe_event')) {
+        assert(recorded, 'event persisted before claim');
+        const key = await request.json();
+        return Response.json({
+          account_id: key.p_account_id,
+          live_mode: key.p_live_mode,
+          event_id: key.p_event_id,
+          object_id: sessionId,
+          order_id: orderId,
+          event_type: 'checkout.session.completed',
+          lease: '11111111-1111-4111-8111-111111111111',
+        });
+      }
+      if (path.endsWith(sessionId)) {
+        await stripeReady;
+        return Response.json(session);
+      }
+      if (path.endsWith('actv_read_order')) return Response.json(order);
+      if (path.endsWith('actv_confirm_stripe')) return Response.json({ ...order, state: 'issued' });
+      if (path.endsWith('actv_finish_stripe_event_retry')) {
+        const result = await request.json();
+        assert(result.p_lease === '11111111-1111-4111-8111-111111111111', 'finishes own lease');
+        assert(result.p_failure_code === null, 'valid background event completes');
+        finalized = true;
+        return Response.json(true);
+      }
+      throw new Error(`Unexpected path ${path}`);
+    }, async () => {
+      try {
+        const response = await webhookHandler(await webhookEvent({ id: sessionId, metadata }));
+        assert(
+          response.ok && (await response.json()).queued && !!task && recorded && !finalized,
+          'responds after saving',
+        );
+      } finally {
+        allowStripe();
+        await task;
+      }
+      assert(finalized, 'persistent event is marked complete after processing');
+    });
+  } finally {
+    if (previous) scope.EdgeRuntime = previous;
+    else delete scope.EdgeRuntime;
+  }
+});
+
+Deno.test('recovery binds only the original Checkout or Terminal object under the ACTV Stripe key', async () => {
+  const terminalIntent = {
+    ...paid,
+    metadata: { ...metadata, actv_channel: 'terminal' },
+    latest_charge: {
+      ...paid.latest_charge as Stripe.Charge,
+      payment_method_details: { type: 'card_present' },
+    },
+  };
+  for (const ageMinutes of [0, 20, 90, 25 * 60]) for (const channel of ['online', 'terminal']) {
+    const online = channel === 'online';
+    const fixture = online ? session : terminalIntent;
+    const providerId = fixture.id;
+    const original = { ...order, channel, provider_session_id: null,
+      created_at: new Date(Date.now() - ageMinutes * 60_000).toISOString(),
+      expires_at: new Date(Date.now() + ((online ? 45 : 15) - ageMinutes) * 60_000).toISOString(),
+    };
+    let canonical = false;
+    let bound = false;
+    let processed = false;
+    let confirmed = 0;
+    let creationRequests = 0;
+    await withMockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const path = new URL(req.url).pathname;
+      if (path.endsWith('actv_record_stripe_event')) return Response.json({ processed });
+      if (path.endsWith('actv_read_order')) {
+        return Response.json({
+          ...original,
+          provider_session_id: bound && online ? providerId : null,
+          provider_payment_id: bound && !online ? providerId : null,
+        });
+      }
+      if (path.endsWith('actv_attach_provider')) {
+        assert(canonical && !bound, 'unbound or noncanonical object must never be attached');
+        const args = await req.json();
+        assert(args.p_payment_id === paid.id, 'bind the exact Stripe intent');
+        assert(
+          args.p_session_id === (online ? sessionId : null),
+          'bind the exact Checkout session for online',
+        );
+        bound = true;
+        return Response.json(original);
+      }
+      if (path.endsWith('actv_confirm_stripe')) {
+        assert(bound, 'binding must precede issuing');
+        confirmed++;
+        return Response.json({ ...original, state: 'issued' });
+      }
+      if (path.endsWith('actv_finish_stripe_event')) {
+        processed = true;
+        return Response.json(null);
+      }
+      if (path.endsWith('actv_checked_stripe_event')) return Response.json(null);
+      assert(req.headers.get('stripe-account') === account, 'provider ownership checked');
+      if (req.method === 'GET' && path.endsWith(providerId)) return Response.json(fixture);
+      if (req.method === 'POST' && path.endsWith(online ? '/checkout/sessions' : '/payment_intents')) {
+        const operation = online ? 'checkout' : 'terminal-intent';
+        assert(
+          req.headers.get('idempotency-key') === 'actv-' + operation + '-' + orderId,
+          'original provider key reused',
+        );
+        creationRequests++;
+        return Response.json({ ...fixture, id: canonical ? providerId : (online ? 'cs_other' : 'pi_other') });
+      }
+      throw new Error('Unexpected path ' + path);
+    }, async () => {
+      const notice = () =>
+        webhookEvent({ id: providerId, metadata: fixture.metadata }, {
+          type: online ? 'checkout.session.completed' : 'payment_intent.succeeded',
+        });
+      assert(
+        (await webhookHandler(await notice())).status === 503 && !bound && confirmed === 0,
+        'mismatched idempotent response cannot issue or be acknowledged as processed',
+      );
+      if (ageMinutes >= 23 * 60) {
+        assert(creationRequests === 0, 'expired idempotency window must not POST a new provider object');
+        return;
+      }
+      canonical = true;
+      assert(
+        (await webhookHandler(await notice())).ok,
+        'canonical session or card-present intent can be recovered',
+      );
+      assert(bound && Number(confirmed) === 1, 'one folio issued after exact binding');
+      const replay = await webhookHandler(await notice());
+      assert(
+        (await replay.json()).duplicate && Number(confirmed) === 1 && creationRequests === 2,
+        'a repeated notice cannot create another object or folio',
+      );
+    });
+  }
 });
 
 Deno.test('terminal completion uses the staff token, configured reader and authoritative Stripe intent', async () => {

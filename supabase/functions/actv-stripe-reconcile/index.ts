@@ -1,12 +1,27 @@
 import { body, env, handler, HttpError, liveMode, rpc } from '../_shared/http.ts';
 import type { Order } from '../_shared/orders.ts';
-import {
-  completeEvent,
-  noteFailedEvent,
-  type StoredEvent,
-  syncPendingOrder,
-} from '../_shared/stripe-events.ts';
-import { stripeClient, stripeErrorCode } from '../_shared/stripe.ts';
+import { claimRefundRecovery, noteRefundRecovery, recoverAdminRefund } from '../_shared/refund-recovery.ts';
+import { acknowledgeEvent, applyEvent, type EventRetry, syncPendingOrder } from '../_shared/stripe-events.ts';
+import { type Stripe, stripeClient, stripeErrorCode } from '../_shared/stripe.ts';
+
+async function retryEvent(stripe: Stripe, mode: boolean, count: { attempted: number; failed: number }) {
+  const event = await rpc<EventRetry | null>('actv_claim_stripe_event_retry', { p_live_mode: mode });
+  if (!event) return false;
+  count.attempted++;
+  let failure: string | null = null;
+  try {
+    await applyEvent(stripe, event);
+  } catch (error) {
+    failure = stripeErrorCode(error);
+  }
+  // A direct webhook can complete the event while a worker holds this lease.
+  const acknowledged = await acknowledgeEvent(event, failure);
+  if (failure && acknowledged) {
+    count.failed++;
+    console.error(JSON.stringify({ component: 'actv-stripe-reconcile', category: 'events', code: failure }));
+  }
+  return true;
+}
 
 async function matchesWorkerSecret(request: Request): Promise<boolean> {
   const supplied = request.headers.get('x-actv-reconcile-secret');
@@ -32,44 +47,58 @@ export const reconciliationHandler = handler('actv-stripe-reconcile', async (req
     throw new HttpError(400, 'invalid_limit');
   }
   const stripe = stripeClient();
-  await rpc('actv_close_unbound_terminals', { p_live_mode: liveMode() });
-  const pending = await rpc<{ events: StoredEvent[]; orders: Order[] }>('actv_pending_stripe', {
-    p_live_mode: liveMode(),
+  const mode = liveMode();
+  await rpc('actv_close_unbound_terminals', { p_live_mode: mode });
+  const orders = await rpc<Order[]>('actv_pending_stripe_orders', {
+    p_live_mode: mode,
     p_limit: limit,
   });
   const result = {
     events: { attempted: 0, failed: 0 },
     orders: { attempted: 0, failed: 0 },
+    refunds: { attempted: 0, failed: 0, notFound: 0 },
     timeBudgetExceeded: false,
   };
   const deadline = Date.now() + 18_000;
-  const work = [
-    ...pending.events.map((record) => ({
-      category: 'events' as const,
-      record,
-      run: () => completeEvent(stripe, record),
-    })),
-    ...pending.orders.map((order) => ({
-      category: 'orders' as const,
-      record: null,
-      run: () => syncPendingOrder(stripe, order),
-    })),
-  ];
-  for (const workItem of work) {
-    if (Date.now() >= deadline) {
-      result.timeBudgetExceeded = true;
-      break;
-    }
-    result[workItem.category].attempted++;
+  const hasTime = () => {
+    if (Date.now() < deadline) return true;
+    result.timeBudgetExceeded = true;
+    return false;
+  };
+  let moreEvents = hasTime() && await retryEvent(stripe, mode, result.events);
+  const refunds = hasTime() ? await claimRefundRecovery(mode, limit) : [];
+  for (const refund of refunds) {
+    if (!hasTime()) break;
+    result.refunds.attempted++;
     try {
-      await workItem.run();
+      if (!(await recoverAdminRefund(stripe, refund, mode))) {
+        result.refunds.notFound++;
+        await noteRefundRecovery(refund, 'refund_not_found');
+      }
     } catch (error) {
-      result[workItem.category].failed++;
+      result.refunds.failed++;
       const code = stripeErrorCode(error);
+      console.error(JSON.stringify({ component: 'actv-stripe-reconcile', category: 'refunds', code }));
+      await noteRefundRecovery(refund, code);
+    }
+  }
+  while (moreEvents && result.events.attempted < limit && hasTime()) {
+    moreEvents = await retryEvent(stripe, mode, result.events);
+  }
+  for (const order of orders) {
+    if (!hasTime()) break;
+    result.orders.attempted++;
+    try {
+      await syncPendingOrder(stripe, order);
+    } catch (error) {
+      result.orders.failed++;
       console.error(
-        JSON.stringify({ component: 'actv-stripe-reconcile', category: workItem.category, code }),
+        JSON.stringify({
+          component: 'actv-stripe-reconcile',
+          category: 'orders',
+          code: stripeErrorCode(error),
+        }),
       );
-      if (workItem.record) await noteFailedEvent(workItem.record, code);
     }
   }
   return result;

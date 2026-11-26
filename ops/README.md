@@ -2,7 +2,7 @@
 
 Use `node ops/status.mjs` from any directory. Optional `--source <checkout>` observes another checkout after verifying its GitHub origin. Optional `--output <file.json>` saves a dated snapshot outside source. `--check` validates readiness offline with no cloud reads. Requires Node and authenticated GitHub CLI; no product runtime is started.
 
-The default source is this checkout. In the local ACTV workspace, `app` selects retained active development and `operations` selects this organization checkout. Run `node operations/ops/status.mjs --source app` there to observe active work. Readiness comes from the operations checkout; both identities are reported. No Git fetch/pull occurs.
+The default source is this checkout. In the local ACTV workspace, `app` and `operations` select the supported candidate checkout. `retained-development` preserves the original dirty source and excluded experiments. Run `node operations/ops/status.mjs --source app` there to observe the supported source; use `--source retained-development` for the preserved older checkout. Readiness comes from the operations checkout; both identities are reported. No Git fetch/pull occurs.
 
 | Metric | Definition | Limit |
 |---|---|---|
@@ -23,3 +23,7 @@ Status never dispatches Actions, modifies readiness or contacts operational serv
 Update the product report when scope/evidence changes. Readiness is the single acceptance record; the plan owns W0–W7 order/dependencies/exit gates. Project-board cards index packages and never confer acceptance. A PASS requires candidate/configuration/environment, reviewer, result and evidence under the existing evidence rule. W6 release approval and W7 actual installation remain separate.
 
 The `ACTV product record` workflow validates this record/tool only. Existing application CI remains separate; the unified full-release `npm run verify` is still a W1 deliverable.
+
+## Supported source verification
+
+The consolidated source uses npm run verify and ops/source-candidate.json. This creates a fresh synthetic container for each run and records source-only evidence under ignored .verification/. Never run staging SQL against retained/hosted data. Full operational schema and W6/W7 acceptance remain open. See docs/consolidation.md.

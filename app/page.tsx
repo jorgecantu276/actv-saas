@@ -1,7 +1,10 @@
 'use client';
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import Link from 'next/link';
+import type { Session } from '@supabase/supabase-js';
+import type { Athlete, RaceEvent, Club } from '../lib/legacy-types';
 import { supabase } from '../lib/supabase';
-import { Users, UserPlus, Calendar, Store, Lock, LogOut, BarChart3, Shield, UserCog, FileText, Eye, EyeOff, Package, Command, Menu, X } from 'lucide-react';
+import { Users, UserPlus, Calendar, Store, LogOut, BarChart3, Shield, UserCog, FileText, Eye, EyeOff, Package, Command, Menu, X } from 'lucide-react';
 
 import TabCaja from '../components/TabCaja';
 import TabAtletas from '../components/TabAtletas';
@@ -25,7 +28,7 @@ const ParticleNetwork = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let particles: Particle[] = [];
+    const particles: Particle[] = [];
     let animationFrameId: number;
 
     const resize = () => {
@@ -61,7 +64,7 @@ const ParticleNetwork = () => {
       update() {
         this.x += this.vx;
         this.y += this.vy;
-        
+
         if (this.x < 0 || this.x > canvas!.width) this.vx = -this.vx;
         if (this.y < 0 || this.y > canvas!.height) this.vy = -this.vy;
 
@@ -86,10 +89,10 @@ const ParticleNetwork = () => {
           const dx = particles[i].x - particles[j].x;
           const dy = particles[i].y - particles[j].y;
           const distance = Math.sqrt(dx * dx + dy * dy);
-          
+
           if (distance < 140) {
             ctx.beginPath();
-            ctx.strokeStyle = `rgba(148, 163, 184, ${0.2 - distance / 700})`; 
+            ctx.strokeStyle = `rgba(148, 163, 184, ${0.2 - distance / 700})`;
             ctx.lineWidth = 0.8;
             ctx.moveTo(particles[i].x, particles[i].y);
             ctx.lineTo(particles[j].x, particles[j].y);
@@ -113,20 +116,47 @@ const ParticleNetwork = () => {
 // =========================================================
 
 export default function DashboardPDV() {
-  const [session, setSession] = useState<any | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [staffUserId, setStaffUserId] = useState<string | null>(null);
   const [emailLogin, setEmailLogin] = useState('');
   const [passwordLogin, setPasswordLogin] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(true);
-  
+
   const [showPassword, setShowPassword] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const [activeTab, setActiveTab] = useState('caja'); 
-  const [atletas, setAtletas] = useState<any[]>([]);
-  const [eventos, setEventos] = useState<any[]>([]);
-  const [clubes, setClubes] = useState<any[]>([]); 
-  const [cargando, setCargando] = useState(true);
+  const [activeTab, setActiveTab] = useState('caja');
+  const [atletas, setAtletas] = useState<Athlete[]>([]);
+  const [eventos, setEventos] = useState<RaceEvent[]>([]);
+  const [clubes, setClubes] = useState<Club[]>([]);
+
+  const obtenerRol = useCallback(async (userId: string) => {
+    const { data } = await supabase.from('perfiles').select('rol').eq('id', userId).single();
+    if (data) {
+      const rolDB = data.rol?.toLowerCase() || '';
+      if (rolDB === 'admin' || rolDB === 'administrador') {
+        setUserRole('Administrador');
+      } else if (rolDB === 'moderador') {
+        setUserRole('Moderador');
+      } else {
+        setUserRole('Cajero');
+      }
+    }
+    setLoadingAuth(false);
+  }, []);
+
+  const cargarDatos = useCallback(async () => {
+    const [{ data: dataAtletas }, { data: dataEventos }, { data: dataClubes }] = await Promise.all([
+      supabase.from('atletas').select('*, perfiles(nombre_completo)').order('created_at', { ascending: false }).limit(50000),
+      supabase.from('eventos').select('*').order('fecha', { ascending: true }).limit(50000),
+      supabase.from('clubes').select('*').order('nombre', { ascending: true }).limit(5000),
+    ]);
+
+    setAtletas(dataAtletas || []);
+    setEventos(dataEventos || []);
+    setClubes(dataClubes || []);
+  }, []);
 
   useEffect(() => {
     let activeUser: string | undefined;
@@ -136,13 +166,20 @@ export default function DashboardPDV() {
       if (!userId) {
         activeUser = undefined;
         setUserRole(null);
+        setStaffUserId(null);
         setLoadingAuth(false);
       } else if (userId !== activeUser) {
         activeUser = userId;
-        setTimeout(() => {
+        setLoadingAuth(true);
+        setTimeout(async () => {
           if (activeUser !== userId) return;
-          void obtenerRol(userId);
-          void cargarDatos();
+          const { data: staff } = await supabase.rpc('actv_is_payment_staff');
+          if (activeUser !== userId) return;
+          setStaffUserId(staff === true ? userId : null);
+          if (staff === true) {
+            void obtenerRol(userId);
+            void cargarDatos();
+          } else { setLoadingAuth(false); }
         }, 0);
       }
     });
@@ -150,38 +187,10 @@ export default function DashboardPDV() {
       activeUser = undefined;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [obtenerRol, cargarDatos]);
 
-  const obtenerRol = async (userId: string) => {
-    const { data } = await supabase.from('perfiles').select('rol').eq('id', userId).single();
-    if (data) {
-      const rolDB = data.rol?.toLowerCase() || '';
-      if (rolDB === 'admin' || rolDB === 'administrador') {
-        setUserRole('Administrador');
-      } else if (rolDB === 'moderador') {
-        setUserRole('Moderador');
-      } else {
-        setUserRole('Cajero'); 
-      }
-    }
-    setLoadingAuth(false);
-  };
 
-  const cargarDatos = async () => {
-    setCargando(true);
-    const [{ data: dataAtletas }, { data: dataEventos }, { data: dataClubes }] = await Promise.all([
-      supabase.from('atletas').select('*, perfiles(nombre_completo)').order('created_at', { ascending: false }).limit(50000),
-      supabase.from('eventos').select('*').order('fecha', { ascending: true }).limit(50000),
-      supabase.from('clubes').select('*').order('nombre', { ascending: true }).limit(5000),
-    ]);
-
-    setAtletas(dataAtletas || []);
-    setEventos(dataEventos || []); 
-    setClubes(dataClubes || []);
-    setCargando(false);
-  };
-
-  const handleLogin = async (e: any) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoadingAuth(true);
     const { error } = await supabase.auth.signInWithPassword({ email: emailLogin, password: passwordLogin });
@@ -215,10 +224,24 @@ export default function DashboardPDV() {
   // =========================================================
   // PANTALLA DE LOGIN
   // =========================================================
+  if (session && staffUserId !== session.user.id) {
+    return (
+      <main className="mx-auto w-full max-w-xl px-6 py-14">
+        <h1 className="text-3xl font-bold">Selecciona tu espacio en ACTV</h1>
+        <nav aria-label="Cuenta ACTV" className="mt-6 flex flex-wrap gap-4 text-blue-800">
+          <Link href="/mi-actv" className="underline">Mi ACTV</Link>
+          <Link href="/organizadores" className="underline">Organizadores</Link>
+          <Link href="/carreras" className="underline">Carreras</Link>
+          <button type="button" className="underline" onClick={handleLogout}>Cerrar sesión</button>
+        </nav>
+      </main>
+    );
+  }
+
   if (!session) {
     return (
       <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans relative overflow-hidden selection:bg-blue-500/30">
-        
+
         <style>{`
           @keyframes smoothEnter {
             0% { opacity: 0; transform: translateY(20px) scale(0.97); }
@@ -241,7 +264,7 @@ export default function DashboardPDV() {
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">ACTV SaaS</h1>
             <p className="text-slate-500 text-sm font-medium mt-2">Ingresa tus credenciales de acceso</p>
           </div>
-          
+
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-1.5">
               <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">Email de Trabajo</label>
@@ -250,17 +273,17 @@ export default function DashboardPDV() {
             <div className="space-y-1.5">
               <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">Contraseña</label>
               <div className="relative">
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  required 
-                  value={passwordLogin} 
-                  onChange={(e) => setPasswordLogin(e.target.value)} 
-                  className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 rounded-xl p-3.5 pr-12 outline-none text-sm transition-all" 
-                  placeholder="••••••••" 
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={passwordLogin}
+                  onChange={(e) => setPasswordLogin(e.target.value)}
+                  className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 rounded-xl p-3.5 pr-12 outline-none text-sm transition-all"
+                  placeholder="••••••••"
                 />
-                <button 
-                  type="button" 
-                  onClick={() => setShowPassword(!showPassword)} 
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-4 top-3.5 text-slate-400 hover:text-slate-700 transition-colors"
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -271,7 +294,7 @@ export default function DashboardPDV() {
               Iniciar Sesión
             </button>
           </form>
-          
+
           <div className="mt-10 text-center text-xs text-slate-400 font-medium space-y-1.5">
             <p>Versión 4.3</p>
             <p>Creado con ❤️ y mucho ☕️ por Pedro Walls.</p>
@@ -287,11 +310,11 @@ export default function DashboardPDV() {
   // =========================================================
   return (
     <main className="min-h-screen bg-slate-50 font-sans flex flex-col selection:bg-blue-500/30">
-      
+
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/80 supports-[backdrop-filter]:bg-white/60 no-print">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-3">
-            
+
             {/* LOGO COMO BOTÓN A CAJA PRINCIPAL */}
             <button onClick={() => handleTabChange('caja')} className="flex items-center gap-4 text-left cursor-pointer hover:opacity-80 transition-opacity focus:outline-none">
               <div className="bg-gradient-to-tr from-slate-900 to-slate-800 text-white p-2.5 rounded-xl shadow-sm">
@@ -307,8 +330,8 @@ export default function DashboardPDV() {
             </button>
 
             <div className="md:hidden">
-              <button 
-                onClick={() => setIsMobileMenuOpen(true)} 
+              <button
+                onClick={() => setIsMobileMenuOpen(true)}
                 className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors focus:outline-none"
               >
                 <Menu size={24} />
@@ -319,7 +342,7 @@ export default function DashboardPDV() {
             <nav className="hidden md:flex items-center gap-1">
               <button onClick={() => handleTabChange('caja')} className={`flex items-center px-4 py-2 text-[13px] font-medium transition-all rounded-full ${activeTab === 'caja' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}><Store className="w-4 h-4 mr-2" /> Caja</button>
               <button onClick={() => handleTabChange('atletas')} className={`flex items-center px-4 py-2 text-[13px] font-medium transition-all rounded-full ${activeTab === 'atletas' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}><UserPlus className="w-4 h-4 mr-2" /> Atletas</button>
-              
+
               {userRole === 'Administrador' && (
                 <button onClick={() => handleTabChange('lista_atletas')} className={`flex items-center px-4 py-2 text-[13px] font-medium transition-all rounded-full ${activeTab === 'lista_atletas' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}><Users className="w-4 h-4 mr-2" /> Padrón</button>
               )}
@@ -350,12 +373,12 @@ export default function DashboardPDV() {
       {/* ÁREA DE TRABAJO */}
       <div className="flex-grow w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-0">
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-          {activeTab === 'caja' && <TabCaja atletas={atletas} eventos={eventos.filter((e: any) => e.fecha >= new Date().toISOString().split('T')[0])} recargarDatos={cargarDatos} userRole={userRole} userId={session?.user?.id} />}
+          {activeTab === 'caja' && <TabCaja atletas={atletas} eventos={eventos.filter((e) => e.fecha >= new Date().toISOString().split('T')[0])} recargarDatos={cargarDatos} userRole={userRole} userId={session?.user?.id} />}
           {activeTab === 'atletas' && <TabAtletas recargarDatos={cargarDatos} clubes={clubes} userId={session?.user?.id} />}
           {activeTab === 'lista_atletas' && userRole === 'Administrador' && <TabListaAtletas atletas={atletas} clubes={clubes} recargarDatos={cargarDatos} />}
           {activeTab === 'clubes' && userRole === 'Administrador' && <TabClubes recargarDatos={cargarDatos} clubes={clubes} atletas={atletas} />}
           {activeTab === 'entrega_kits' && (userRole === 'Administrador' || userRole === 'Moderador') && <TabEntregaKits eventos={eventos} userRole={userRole} userId={session?.user?.id} />}
-          {activeTab === 'eventos' && (userRole === 'Administrador' || userRole === 'Moderador') && <TabEventos recargarDatos={cargarDatos} eventos={eventos} userRole={userRole} userId={session?.user?.id} />}     
+          {activeTab === 'eventos' && (userRole === 'Administrador' || userRole === 'Moderador') && <TabEventos recargarDatos={cargarDatos} eventos={eventos} userRole={userRole} userId={session?.user?.id} />}
           {activeTab === 'reportes' && (userRole === 'Administrador' || userRole === 'Moderador') && <TabReportes eventos={eventos} userRole={userRole} userId={session?.user?.id} />}
           {activeTab === 'usuarios' && userRole === 'Administrador' && <TabUsuarios eventos={eventos} />}
           {activeTab === 'cotizaciones' && userRole === 'Administrador' && <TabCotizaciones userRole={userRole} />}
@@ -368,7 +391,7 @@ export default function DashboardPDV() {
           ========================================================= */}
       {isMobileMenuOpen && (
         <div className="md:hidden fixed top-0 left-0 w-full h-full bg-white z-[99999] flex flex-col overflow-y-auto">
-          
+
           {/* Encabezado del Menú */}
           <div className="flex justify-between items-center p-5 border-b border-slate-200 sticky top-0 bg-white z-10">
             <div className="flex items-center gap-3">
@@ -380,8 +403,8 @@ export default function DashboardPDV() {
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">ACTV SaaS</p>
               </div>
             </div>
-            <button 
-              onClick={() => setIsMobileMenuOpen(false)} 
+            <button
+              onClick={() => setIsMobileMenuOpen(false)}
               className="p-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-full transition-colors focus:outline-none"
             >
               <X size={24} />
@@ -390,13 +413,13 @@ export default function DashboardPDV() {
 
           {/* Botones del Menú */}
           <div className="flex-1 p-5 space-y-2 pb-12">
-            
+
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest px-2 py-1">Panel de Trabajo</p>
-            
+
             <button onClick={() => handleTabChange('caja')} className={`flex w-full items-center px-4 py-4 rounded-xl text-[15px] font-bold ${activeTab === 'caja' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700'}`}>
               <Store className="w-5 h-5 mr-3" /> Caja
             </button>
-            
+
             <button onClick={() => handleTabChange('atletas')} className={`flex w-full items-center px-4 py-4 rounded-xl text-[15px] font-bold ${activeTab === 'atletas' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700'}`}>
               <UserPlus className="w-5 h-5 mr-3" /> Nuevo Atleta
             </button>

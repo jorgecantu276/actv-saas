@@ -1,18 +1,19 @@
 'use client';
 
-import { crearAccesoUsuario, actualizarContrasenaUsuario } from '../app/actions/usuarios'; 
-import React, { useState, useEffect } from 'react';
+
+import { useClientReady } from '../lib/use-client-ready';
+import type { StaffProfile, StaffScreenProps } from '../lib/legacy-types';
+import { crearAccesoUsuario, actualizarContrasenaUsuario } from '../app/actions/usuarios';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
-import { UserCog, UserPlus, Trash2, Edit, Mail, Briefcase, Lock, Search, Phone, X, Shield, PlusCircle, Store, ChevronDown, UserCircle } from 'lucide-react';
+import { UserCog, UserPlus, Trash2, Edit, Mail, Briefcase, Lock, Search, Phone, X, Shield, PlusCircle, Store, ChevronDown } from 'lucide-react';
 
-export default function TabUsuarios({ eventos = [] }: any) {
+export default function TabUsuarios({ eventos = [] }: Pick<StaffScreenProps, 'eventos'>) {
   // Para evitar errores de hidratación con createPortal en Next.js
-  const [isMounted, setIsMounted] = useState(false);
-  useEffect(() => { setIsMounted(true); }, []);
+  const isMounted = useClientReady();
 
-  const [usuarios, setUsuarios] = useState<any[]>([]);
-  const [cargando, setCargando] = useState(true);
+  const [usuarios, setUsuarios] = useState<StaffProfile[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [enviando, setEnviando] = useState(false);
 
@@ -22,41 +23,45 @@ export default function TabUsuarios({ eventos = [] }: any) {
     telefono: '',
     email: '',
     password: '',
-    confirmPassword: '', 
+    confirmPassword: '',
     rol: 'Cajero',
     eventos_asignados: [] as string[]
   });
 
   // ESTADOS EDICIÓN
-  const [editando, setEditando] = useState<any | null>(null);
+  const [editando, setEditando] = useState<StaffProfile | null>(null);
   const [formEdit, setFormEdit] = useState({
     nombre_completo: '',
     telefono: '',
     rol: '',
     eventos_asignados: [] as string[],
-    nueva_contrasena: '' 
+    nueva_contrasena: ''
   });
 
-  useEffect(() => {
-    cargarUsuarios();
-  }, []);
-
+  const consultarUsuarios = useCallback(() => supabase.from('perfiles').select('*'), []);
   const cargarUsuarios = async () => {
-    setCargando(true);
-    const { data } = await supabase.from('perfiles').select('*');
+    const { data } = await consultarUsuarios();
     if (data) setUsuarios(data);
-    setCargando(false);
   };
+
+  useEffect(() => {
+    let active = true;
+    void consultarUsuarios().then(({ data }) => {
+      if (active && data) setUsuarios(data);
+    });
+    return () => { active = false; };
+  }, [consultarUsuarios]);
+
 
   const handleCrearUsuario = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (form.password !== form.confirmPassword) {
       alert("⚠️ Las contraseñas no coinciden. Por favor, verifícalas.");
       return;
     }
 
-    setEnviando(true); 
+    setEnviando(true);
 
     const { data: { session } } = await supabase.auth.getSession();
     const resultado = await crearAccesoUsuario(form, session?.access_token ?? '');
@@ -64,7 +69,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
     if (resultado.success) {
       alert("¡Usuario y acceso creados con éxito!");
       setForm({ nombre_completo: '', telefono: '', email: '', password: '', confirmPassword: '', rol: 'Cajero', eventos_asignados: [] });
-      cargarUsuarios(); 
+      cargarUsuarios();
     } else {
       alert("Error: " + resultado.error);
     }
@@ -92,7 +97,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
     setFormEdit({ ...formEdit, eventos_asignados: formEdit.eventos_asignados.filter(id => id !== eventoId) });
   };
 
-  const abrirEdicion = (u: any) => {
+  const abrirEdicion = (u: StaffProfile) => {
     setEditando(u);
 
     let rolFormat = 'Cajero';
@@ -106,15 +111,16 @@ export default function TabUsuarios({ eventos = [] }: any) {
       telefono: u.telefono || '',
       rol: rolFormat,
       eventos_asignados: u.eventos_asignados || [],
-      nueva_contrasena: '' 
+      nueva_contrasena: ''
     });
   };
 
   const guardarEdicion = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editando) return;
     setEnviando(true);
     const rolLower = formEdit.rol?.toLowerCase();
-    
+
     const { error } = await supabase.from('perfiles').update({
       nombre_completo: formEdit.nombre_completo,
       telefono: formEdit.telefono,
@@ -134,7 +140,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
         setEnviando(false);
         return;
       }
-      
+
       const { data: { session } } = await supabase.auth.getSession();
       const resPwd = await actualizarContrasenaUsuario(editando.id, formEdit.nueva_contrasena, session?.access_token ?? '');
       if (!resPwd.success) {
@@ -172,7 +178,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        
+
         {/* ========================================================= */}
         {/* COLUMNA IZQ: NUEVO ACCESO                                 */}
         {/* ========================================================= */}
@@ -185,7 +191,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Nombre Completo *</label>
               <input type="text" required value={form.nombre_completo} onChange={(e) => setForm({...form, nombre_completo: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-sm font-bold text-slate-900 placeholder:text-slate-400" />
             </div>
-            
+
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1 flex items-center"><Phone className="w-3 h-3 mr-1.5"/> Teléfono *</label>
               <input type="tel" required value={form.telefono} onChange={(e) => setForm({...form, telefono: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-sm font-medium text-slate-900 placeholder:text-slate-400" />
@@ -224,15 +230,15 @@ export default function TabUsuarios({ eventos = [] }: any) {
             {(form.rol === 'Moderador' || form.rol === 'Cajero') && (
               <div className="animate-in slide-in-from-top-2 bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 mt-4">
                 <label className="block text-[10px] font-black text-slate-700 uppercase tracking-wider">Asignar Eventos Permitidos</label>
-                
+
                 <div className="relative">
-                  <select 
-                    value="" 
-                    onChange={(e) => addEvento(e.target.value)} 
+                  <select
+                    value=""
+                    onChange={(e) => addEvento(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-900/5 text-xs font-bold text-slate-600 appearance-none cursor-pointer transition-all"
                   >
                     <option value="" disabled>Añadir carrera a la lista...</option>
-                    {eventos?.map((ev: any) => (
+                    {eventos?.map((ev) => (
                       <option key={ev.id} value={ev.id}>{ev.nombre_carrera}</option>
                     ))}
                   </select>
@@ -242,7 +248,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
                 <div className="flex flex-wrap gap-2 pt-1">
                   {form.eventos_asignados.length === 0 && <span className="text-[10px] text-slate-400 font-bold italic">No hay carreras asignadas aún.</span>}
                   {form.eventos_asignados.map(id => {
-                    const evt = eventos?.find((e: any) => e.id === id);
+                    const evt = eventos?.find((e) => e.id === id);
                     return evt ? (
                       <span key={id} className="bg-slate-900 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center shadow-sm animate-in zoom-in duration-200">
                         {evt.nombre_carrera} <X className="w-3.5 h-3.5 ml-1.5 cursor-pointer hover:text-red-400 transition-colors" onClick={() => removeEvento(id)} />
@@ -265,9 +271,9 @@ export default function TabUsuarios({ eventos = [] }: any) {
         <div className="xl:col-span-2 space-y-6">
           <div className="relative group">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
-            <input 
-              type="text" 
-              placeholder="Buscar personal por nombre o rol..." 
+            <input
+              type="text"
+              placeholder="Buscar personal por nombre o rol..."
               className="w-full bg-white border border-slate-200 p-4 pl-12 rounded-3xl outline-none text-sm shadow-sm focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all text-slate-900 placeholder:text-slate-400 font-medium"
               onChange={(e) => setBusqueda(e.target.value)}
             />
@@ -277,10 +283,10 @@ export default function TabUsuarios({ eventos = [] }: any) {
             {usuarios.filter(u => u.rol?.toLowerCase().includes(busqueda.toLowerCase()) || u.nombre_completo?.toLowerCase().includes(busqueda.toLowerCase())).map((u) => {
               const rL = u.rol?.toLowerCase();
               const rolUI = rL.includes('admin') ? 'Administrador' : rL.includes('pdv') ? 'PDV ACTV' : rL.includes('moderad') ? 'Moderador' : 'Cajero';
-              
+
               return (
               <div key={u.id} className="bg-white p-5 rounded-3xl ring-1 ring-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-5 group">
-                
+
                 <div className="flex items-start sm:items-center gap-4">
                   <div className={`p-4 rounded-2xl shrink-0 ${rolUI === 'Administrador' ? 'bg-purple-50 text-purple-600 ring-1 ring-purple-100' : rolUI === 'PDV ACTV' ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100' : rolUI === 'Moderador' ? 'bg-blue-50 text-blue-600 ring-1 ring-blue-100' : 'bg-slate-50 text-slate-600 ring-1 ring-slate-200'}`}>
                     {rolUI === 'Administrador' ? <Shield className="w-6 h-6" /> : rolUI === 'PDV ACTV' ? <Store className="w-6 h-6" /> : <Briefcase className="w-6 h-6" />}
@@ -290,7 +296,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
                     <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-2">
                       <p className="text-xs font-medium text-slate-500 flex items-center"><Mail className="w-3.5 h-3.5 mr-1.5 text-slate-400"/> {u.email}</p>
                     </div>
-                    
+
                     <div className="flex flex-wrap gap-2 mt-3">
                       <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest shadow-sm ${rolUI === 'Administrador' ? 'bg-purple-600 text-white' : rolUI === 'PDV ACTV' ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white'}`}>
                         {rolUI}
@@ -298,7 +304,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
                       {/* Mostrar eventos para Moderadores y Cajeros */}
                       {(rolUI === 'Moderador' || rolUI === 'Cajero') && u.eventos_asignados?.map((id: string) => (
                         <span key={id} className="text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200 px-2 py-1 rounded-md uppercase line-clamp-1 max-w-[150px]">
-                          {eventos?.find((e:any) => e.id === id)?.nombre_carrera || 'Carrera'}
+                          {eventos?.find((e) => e.id === id)?.nombre_carrera || 'Carrera'}
                         </span>
                       ))}
                     </div>
@@ -334,7 +340,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
           {/* max-h-[90vh], overflow-y-auto y my-auto aseguran el comportamiento perfecto en móviles */}
           <div className="bg-white rounded-[32px] p-8 md:p-10 max-w-md w-full shadow-2xl relative animate-in zoom-in-95 duration-200 my-auto max-h-[90vh] overflow-y-auto custom-scrollbar">
             <button type="button" onClick={() => setEditando(null)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-2 rounded-full transition-all"><X size={20}/></button>
-            
+
             <div className="mb-8 border-b pb-5 border-slate-100">
               <div className="bg-slate-100 w-12 h-12 rounded-2xl flex items-center justify-center mb-4">
                 <UserCog className="w-6 h-6 text-slate-900"/>
@@ -342,18 +348,18 @@ export default function TabUsuarios({ eventos = [] }: any) {
               <h3 className="text-2xl font-black text-slate-900 tracking-tight flex items-center leading-none">Editar Perfil</h3>
               <p className="text-[10px] text-slate-500 mt-2 uppercase font-black tracking-widest">{editando.email}</p>
             </div>
-            
+
             <form onSubmit={guardarEdicion} className="space-y-5">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Nombre Completo</label>
                 <input required value={formEdit.nombre_completo} onChange={(e) => setFormEdit({...formEdit, nombre_completo: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none text-slate-900 font-bold focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-sm" />
               </div>
-              
+
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Teléfono</label>
                 <input type="tel" required value={formEdit.telefono} onChange={(e) => setFormEdit({...formEdit, telefono: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none text-slate-900 focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-sm font-medium" />
               </div>
-              
+
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Rol Operativo</label>
                 <div className="relative">
@@ -371,15 +377,15 @@ export default function TabUsuarios({ eventos = [] }: any) {
               {(formEdit.rol === 'Moderador' || formEdit.rol === 'Cajero') && (
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 mt-4">
                   <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest">Eventos Asignados</label>
-                  
+
                   <div className="relative">
-                    <select 
-                      value="" 
-                      onChange={(e) => addEventoEdit(e.target.value)} 
+                    <select
+                      value=""
+                      onChange={(e) => addEventoEdit(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded-xl p-3 outline-none text-xs text-slate-600 appearance-none cursor-pointer focus:border-slate-400 transition-all font-bold"
                     >
                       <option value="" disabled>Añadir carrera a la lista...</option>
-                      {eventos?.map((ev: any) => <option key={ev.id} value={ev.id}>{ev.nombre_carrera}</option>)}
+                      {eventos?.map((ev) => <option key={ev.id} value={ev.id}>{ev.nombre_carrera}</option>)}
                     </select>
                     <PlusCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
                   </div>
@@ -388,7 +394,7 @@ export default function TabUsuarios({ eventos = [] }: any) {
                     {formEdit.eventos_asignados.length === 0 && <span className="text-[10px] text-slate-400 font-bold italic">No hay carreras asignadas.</span>}
                     {formEdit.eventos_asignados.map(id => (
                       <span key={id} className="bg-slate-900 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center shadow-sm animate-in zoom-in duration-200">
-                        {eventos?.find((e: any) => e.id === id)?.nombre_carrera || 'Carrera'} 
+                        {eventos?.find((e) => e.id === id)?.nombre_carrera || 'Carrera'}
                         <X className="w-3.5 h-3.5 ml-1.5 cursor-pointer hover:text-red-400 transition-colors" onClick={() => removeEventoEdit(id)} />
                       </span>
                     ))}
@@ -399,12 +405,12 @@ export default function TabUsuarios({ eventos = [] }: any) {
               {/* RECUPERACIÓN DE CONTRASEÑA */}
               <div className="pt-5 mt-6 border-t border-slate-100">
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 flex items-center tracking-wider pl-1"><Lock className="w-3 h-3 mr-1.5"/> Forzar Nueva Contraseña</label>
-                <input 
-                  type="text" 
-                  value={formEdit.nueva_contrasena} 
-                  onChange={(e) => setFormEdit({...formEdit, nueva_contrasena: e.target.value})} 
-                  placeholder="Escribe para cambiarla..." 
-                  className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none font-mono tracking-widest text-slate-900 placeholder:text-slate-400 text-sm focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all" 
+                <input
+                  type="text"
+                  value={formEdit.nueva_contrasena}
+                  onChange={(e) => setFormEdit({...formEdit, nueva_contrasena: e.target.value})}
+                  placeholder="Escribe para cambiarla..."
+                  className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-xl outline-none font-mono tracking-widest text-slate-900 placeholder:text-slate-400 text-sm focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all"
                 />
                 <p className="text-[9px] text-slate-400 mt-2 font-bold px-1">Si la dejas en blanco, conservará la contraseña actual intacta.</p>
               </div>

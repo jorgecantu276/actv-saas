@@ -1,5 +1,5 @@
 import Stripe from 'npm:stripe@23.1.0';
-import { env, HttpError, liveMode, rpc } from './http.ts';
+import { appOrigin, env, HttpError, liveMode, rpc } from './http.ts';
 import type { Order } from './orders.ts';
 
 export { Stripe };
@@ -38,10 +38,10 @@ export const providerOrderId = (metadata: Stripe.Metadata | null, channel: 'onli
 
 export function stripeRedirect(
   value: string,
-  hostname: 'checkout.stripe.com' | 'connect.stripe.com',
+  ...hostnames: Array<'checkout.stripe.com' | 'accounts.stripe.com' | 'connect.stripe.com'>
 ): string {
   const url = new URL(value);
-  if (url.origin !== `https://${hostname}` || url.username || url.password) {
+  if (!hostnames.some((hostname) => url.origin === `https://${hostname}`) || url.username || url.password) {
     throw new HttpError(409, 'provider_redirect_mismatch');
   }
   return url.href;
@@ -72,11 +72,88 @@ function closeOrder(account: string, orderId: string, sessionId: string | null, 
   });
 }
 
-async function boundOrder(account: string, orderId: string, channel: 'online' | 'terminal', object: string) {
+async function providerOrder(account: string, orderId: string, channel: 'online' | 'terminal') {
   const order = await rpc<Order | null>('actv_read_order', { p_order_id: orderId });
-  return !!order && order.account_id === account && order.live_mode === liveMode() &&
-    order.channel === channel &&
-    (channel === 'online' ? order.provider_session_id : order.provider_payment_id) === object;
+  return order && order.account_id === account && order.live_mode === liveMode() &&
+      order.channel === channel
+    ? order
+    : null;
+}
+
+function matchesCheckoutOrder(session: Stripe.Checkout.Session, order: Order) {
+  return session.livemode === order.live_mode && session.mode === 'payment' &&
+    session.client_reference_id === order.order_id &&
+    providerOrderId(session.metadata, 'online') === order.order_id &&
+    session.amount_total === order.amount && session.currency === order.currency;
+}
+
+function assertRecoveryWindow(order: Order) {
+  const created = Date.parse(order.created_at ?? '');
+  const age = Date.now() - created;
+  // Stripe retains an idempotency key for at least 24h. Stop before it can
+  // expire; an unknown/old timestamp requires explicit operational resolution.
+  if (!Number.isFinite(age) || age < 0 || age >= 23 * 60 * 60_000) {
+    throw new HttpError(409, 'provider_recovery_window_closed');
+  }
+}
+
+export async function createCheckoutSession(stripe: Stripe, order: Order, account: string, recovery = false) {
+  const expiresAt = Math.floor(Date.parse(order.expires_at) / 1000);
+  if (recovery) assertRecoveryWindow(order);
+  if (!Number.isSafeInteger(expiresAt) || (!recovery && expiresAt < Math.floor(Date.now() / 1000) + 1_805)) {
+    throw new HttpError(409, 'reservation_checkout_window_closed');
+  }
+  if (!order.buyer_email) throw new HttpError(409, 'provider_checkout_mismatch');
+
+  const success = new URL('/registro/estado', appOrigin());
+  success.searchParams.set('orden', order.order_id);
+  success.hash = new URLSearchParams({ token: order.status_token }).toString();
+  const cancel = new URL(success);
+  cancel.searchParams.set('cancelado', '1');
+  const metadata = orderMetadata(order);
+  const session = await stripe.checkout.sessions.create({
+    mode: 'payment',
+    adaptive_pricing: { enabled: false },
+    allowed_payment_method_types: ['card'],
+    client_reference_id: order.order_id,
+    customer_email: order.buyer_email,
+    success_url: success.href,
+    cancel_url: cancel.href,
+    expires_at: expiresAt,
+    metadata,
+    payment_intent_data: {
+      metadata,
+      application_fee_amount: order.application_fee_amount || undefined,
+    },
+    line_items: order.items.map((item) => ({
+      quantity: 1,
+      price_data: {
+        currency: order.currency,
+        unit_amount: item.amount,
+        product_data: { name: item.name },
+      },
+    })),
+  }, stripeOptions(account, 'actv-checkout-' + order.order_id));
+  if (!matchesCheckoutOrder(session, order)) throw new HttpError(409, 'provider_checkout_mismatch');
+  return session;
+}
+
+function matchesTerminalOrder(intent: Stripe.PaymentIntent, order: Order) {
+  return intent.livemode === order.live_mode && intent.amount === order.amount &&
+    intent.currency === order.currency && providerOrderId(intent.metadata, 'terminal') === order.order_id;
+}
+
+export async function createTerminalIntent(stripe: Stripe, order: Order, account: string) {
+  const intent = await stripe.paymentIntents.create({
+    currency: order.currency,
+    amount: order.amount,
+    application_fee_amount: order.application_fee_amount || undefined,
+    allowed_payment_method_types: ['card_present'],
+    capture_method: 'automatic',
+    metadata: orderMetadata(order),
+  }, stripeOptions(account, 'actv-terminal-intent-' + order.order_id));
+  if (!matchesTerminalOrder(intent, order)) throw new HttpError(409, 'provider_terminal_mismatch');
+  return intent;
 }
 
 export function captureProof(
@@ -185,28 +262,46 @@ export async function syncCheckout(
   const orderId = providerOrderId(session.metadata, 'online');
   if (!orderId && !expectedOrderId) return null;
   if (
-    !orderId || session.livemode !== liveMode() || session.mode !== 'payment' ||
+    !orderId || session.id !== sessionId || session.livemode !== liveMode() || session.mode !== 'payment' ||
     session.client_reference_id !== orderId || (expectedOrderId && expectedOrderId !== orderId)
   ) {
     throw new HttpError(409, 'provider_checkout_mismatch');
   }
-  if (!await boundOrder(account, orderId, 'online', session.id)) return null;
+  const order = await providerOrder(account, orderId, 'online');
+  if (!order || (order.provider_session_id && order.provider_session_id !== session.id)) return null;
 
   const intent = session.payment_intent;
-  if (session.status === 'complete' && session.payment_status === 'paid') {
-    if (
+  const completed = session.status === 'complete' && session.payment_status === 'paid';
+  const expired = session.payment_status === 'unpaid' && session.status === 'expired' &&
+    (!intent || (typeof intent !== 'string' && intent.status === 'canceled'));
+  if (
+    completed && (
       !intent || typeof intent === 'string' || providerOrderId(intent.metadata, 'online') !== orderId ||
       session.amount_total !== intent.amount_received || session.currency !== 'mxn'
-    ) {
-      throw new HttpError(409, 'provider_checkout_mismatch');
-    }
-    return await confirmCapture(stripe, account, intent, 'online', session.id);
+    )
+  ) {
+    throw new HttpError(409, 'provider_checkout_mismatch');
   }
 
-  if (
-    session.payment_status === 'unpaid' && session.status === 'expired' &&
-    (!intent || (typeof intent !== 'string' && intent.status === 'canceled'))
-  ) {
+  if (!order.provider_session_id) {
+    // Tags identify a candidate order, but the key used by ACTV must return this exact session before binding.
+    if (
+      !completed || order.state !== 'pending' || !matchesCheckoutOrder(session, order) ||
+      !intent || typeof intent === 'string' || !captureProof(intent, 'online', order.live_mode)
+    ) {
+      return null;
+    }
+    const canonical = await createCheckoutSession(stripe, order, account, true);
+    if (canonical.id !== session.id) {
+      throw new HttpError(409, 'provider_checkout_mismatch');
+    }
+    await attachProvider(order, account, session.id, intent.id);
+  }
+
+  if (completed && intent && typeof intent !== 'string') {
+    return await confirmCapture(stripe, account, intent, 'online', session.id);
+  }
+  if (expired) {
     return await closeOrder(account, orderId, session.id, objectId(intent));
   }
   return null;
@@ -225,10 +320,28 @@ export async function syncTerminal(
   );
   const orderId = providerOrderId(intent.metadata, 'terminal');
   if (!orderId && !expectedOrderId) return { order: null, intent };
-  if (!orderId || intent.livemode !== liveMode() || (expectedOrderId && expectedOrderId !== orderId)) {
+  if (
+    !orderId || intent.id !== paymentId || intent.livemode !== liveMode() ||
+    (expectedOrderId && expectedOrderId !== orderId)
+  ) {
     throw new HttpError(409, 'provider_terminal_mismatch');
   }
-  if (!await boundOrder(account, orderId, 'terminal', intent.id)) return { order: null, intent };
+  const order = await providerOrder(account, orderId, 'terminal');
+  if (!order || (order.provider_payment_id && order.provider_payment_id !== intent.id)) {
+    return { order: null, intent };
+  }
+  if (!order.provider_payment_id) {
+    if (
+      order.state !== 'pending' ||
+      !matchesTerminalOrder(intent, order) || !captureProof(intent, 'terminal', order.live_mode)
+    ) {
+      return { order: null, intent };
+    }
+    assertRecoveryWindow(order);
+    const canonical = await createTerminalIntent(stripe, order, account);
+    if (canonical.id !== intent.id) throw new HttpError(409, 'provider_terminal_mismatch');
+    await attachProvider(order, account, null, intent.id);
+  }
   if (intent.status === 'succeeded') {
     return { order: await confirmCapture(stripe, account, intent, 'terminal', null), intent };
   }

@@ -1,6 +1,6 @@
 # ACTV Stripe pilot operations
 
-The five Edge Functions use the same ACTV Postgres accounting model for hosted Checkout and an eligible
+The Edge Functions use the same ACTV Postgres accounting model for hosted Checkout and an eligible
 connected-account Terminal reader. Checkout uses Stripe Standard accounts and hosted links, then makes direct
 MXN card charges on the connected account. Stripe Terminal creates direct MXN `card_present` PaymentIntents
 with automatic capture. Reader hardware, sandbox and live activation are separate verification steps. The
@@ -8,27 +8,32 @@ integration has no route that fabricates payment confirmation.
 
 ## Staging setup
 
-Use a separate Supabase project with isolated synthetic data and a Stripe sandbox. Apply the ACTV accounting
-migrations to the staging project once its baseline ACTV schema matches the references in the migrations. Set
-the following environment values using Supabase Edge secret management. Put local-only values in an ignored
-env file. Never place any Stripe secret, webhook secret or Supabase privileged key in a `NEXT_PUBLIC_`
-variable, browser bundle, Git history, or URL.
+Use a separate Supabase project with synthetic data and a Stripe sandbox. Once the staging ACTV baseline
+schema is in place, apply every pending migration for the deployed revision, including shared schema changes
+used by Stripe and Mercado Pago. For the hosted online Stripe pilot, deploy `actv-checkout`,
+`actv-organizer-connect`, `actv-stripe-webhook` and `actv-stripe-reconcile`. Deploy `actv-admin-payments`
+for the `/pagos` checks and `actv-stripe-terminal` for in-person payments. For a Stripe-only staging event, keep
+`mercadopago_enabled=false`. Its `ACTV_MP_TEST_*` settings and `actv-mercadopago-webhook` are only needed
+for the separate Mercado Pago test.
+
+Set these values through Supabase Edge secret management. Put local-only values in an ignored env file.
+Keep Stripe secrets, webhook signing secrets, and privileged Supabase keys on the server.
 
 | Variable                       | Value                                                                                                                                                                                     |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ACTV_STRIPE_MODE`             | `test` for Stripe sandbox, `live` only on the approved production setup                                                                                                                   |
-| `ACTV_STRIPE_SECRET_KEY`       | Platform Stripe API secret scoped to the configured mode, with Connect account/link, Checkout, PaymentIntent, refund/dispute read, payout/balance read, and opted-in Terminal permissions |
+| `ACTV_STRIPE_SECRET_KEY`       | Platform Stripe API secret scoped to the configured mode, with Connect account/link, Checkout, PaymentIntent, refund read/write for the admin panel, dispute read, payout/balance read, and opted-in Terminal permissions |
 | `ACTV_STRIPE_WEBHOOK_SECRET`   | Signing secret for this exact Connect event destination in the configured mode                                                                                                            |
 | `ACTV_STRIPE_RECONCILE_SECRET` | Unique unpredictable worker secret of at least 32 characters                                                                                                                              |
-| `ACTV_APP_URL`                 | Checkout and organizer site HTTPS origin, without a path. `http://localhost:3000` is supported in test mode                                                                               |
+| `ACTV_APP_URL`                 | `https://staging-pdv.actv.mx` for hosted staging. `http://localhost:3000` is supported for a local test |
 | `ACTV_STAFF_ORIGIN`            | Optional separate HTTPS origin for the cashier site when it differs from `ACTV_APP_URL`                                                                                                   |
 
 The Supabase runtime provides `SUPABASE_URL` and `SUPABASE_SECRET_KEYS` (default `secret` key) or the legacy
-`SUPABASE_SERVICE_ROLE_KEY`. The organizer and terminal functions verify the Supabase user token and the
-database checks scoped staff or manager assignments. The public checkout requires both order UUID and opaque
-status token for status/resume. The status token travels in the return URL fragment. Separate staging and
-production database, merchant accounts, web origins, credentials and webhook destinations. Do not switch an
-active production environment to test mode for a trial.
+`SUPABASE_SERVICE_ROLE_KEY`. `supabase/config.toml` configures the Edge gateway. The organizer, admin and
+terminal handlers verify the Supabase user token and the database checks scoped assignments. The public
+checkout requires both order UUID and opaque status token for status/resume. The status token travels in the
+return URL fragment. Use the same Stripe sandbox for the platform key, connected Mexican Standard account and
+webhook destination.
 
 Use the Stripe Connect destination for **events on connected accounts**, snapshot format, for
 `actv-stripe-webhook`. Subscribe to the set enumerated in `_shared/stripe-events.ts`. Stripe’s endpoint path
@@ -43,12 +48,18 @@ Schedule a single invocation each minute of `POST /functions/v1/actv-stripe-reco
 value in a secrets manager or Supabase Vault for a reviewed scheduler integration. The worker is privileged
 and is independent of the public status poll. Alert on failed HTTP responses, failed records or oldest
 unprocessed event age. Rows keep provider event IDs and sanitized failure codes for replay triage. The worker
-selects pending events with backoff and orders with attached IDs, and avoids unbounded orders per invocation.
+claims due provider events one at a time, up to the requested limit. A claim reserves the event for eight
+minutes while its worker is active. If that worker stops before finishing, a later run can claim the event
+after the lease expires. Acknowledgments from an expired lease cannot change the event. A successful direct
+Stripe delivery can still complete it immediately. Provider failures keep an exponential retry delay of
+15 seconds to one hour. The worker also checks pending orders with attached IDs and recovers eligible admin
+refund records using read-only Stripe lookups.
 Provision the scheduler explicitly in staging and production. This repository does not install credentials, a
 hosted event destination, or a cron schedule by itself.
 
 ## Payment paths and verification
 
+- `actv-admin-payments`: the payments manager can list and inspect local orders, see Stripe charge details, and issue a full refund against an eligible card payment. The request records the manager, reason, commission choice, and Stripe refund ID. Use Stripe for partial refunds and reconciliation exceptions.
 - `actv-checkout`: `event` resolves a published UUID or slug, `start` opens one hosted Checkout session using
   the recorded order amount, `status` reads database state, and `resume` retrieves the same still-open session
   for that order token. Checkout and onboarding use Stripe's canonical HTTPS hosts during the pilot.
@@ -69,12 +80,14 @@ hosted event destination, or a cron schedule by itself.
   statement. Stripe payout `paid` alone does not match a bank deposit. Manual payouts require a separate
   statement workflow.
 
-In staging, test authorized and failed payments, replay of one Stripe event, out-of-order success/expiry,
-interrupted webhook delivery followed by scheduled recovery, terminal decline/retry/cancel, expired
-reservation with late capture, refunds/disputes, and an automatic-payout export against a sample statement.
-Confirm a failed or merely authorized payment produces zero folios and retries never mint a second folio. Use
-Stripe sandbox payment methods and a simulated reader. The offline tests below exercise synthetic HTTP
-responses and cryptographic fixture signatures without network access or live secrets.
+Stripe sandbox purchases and the local regression tests used the local ACTV backend. Hosted staging still
+needs the checkout, Connect webhook and scheduled reconciliation verified together. For a MXN 350 online
+purchase, compare the captured charge on the organizer account, one eligible folio in ACTV, and the matching
+MXN 15 [Application Fee](https://docs.stripe.com/api/application_fees) on the platform sandbox. Resend the same
+event and check that the counts stay at one. Test failed and abandoned payments, out-of-order success and
+expiry, interrupted delivery followed by scheduled recovery, and refunds. Test Terminal and payout exports
+separately if those features are in scope. The offline commands below exercise synthetic Stripe responses and
+fixture signatures.
 
 ```sh
 deno test --allow-env --config supabase/functions/deno.json supabase/functions/_shared/payments_test.ts

@@ -65,7 +65,8 @@ globalThis.fetch = async (input, init) => {
     const form = new URLSearchParams(await request.text());
     const order = form.get('client_reference_id')!;
     const amount = Number(form.get('line_items[0][price_data][unit_amount]'));
-    assert.equal(amount,50000);
+    assert.equal(amount,35000);
+    assert.equal(form.get('payment_intent_data[application_fee_amount]'),'1500');
     assert.equal(request.headers.get('idempotency-key'),`actv-checkout-${order}`);
     const suffix = order.replaceAll('-','');
     const metadata = { actv_order_id:order,actv_channel:'online' };
@@ -88,6 +89,9 @@ globalThis.fetch = async (input, init) => {
   const sessionId = url.pathname.split('/').at(-1);
   const fixture = fixtures.get(sessionId ?? '');
   assert(fixture, `Unrecognized Stripe fixture: ${url.pathname}`);
+  if (![...url.searchParams.values()].includes('payment_intent.latest_charge')) {
+    return Response.json({ ...fixture,status:'open',payment_status:'unpaid',payment_intent:null });
+  }
   return Response.json(fixture);
 };
 
@@ -114,9 +118,9 @@ async function delivery(orderId: string) {
 
 try {
   await db.query(`insert into eventos(id,nombre_carrera,fecha,organizador,distancia,nombre_precio_1,precio_1,
-    folio_inicial,cupo_maximo) values($1,'Carrera de prueba Edge',current_date+7,'ACTV','5k','Individual',500,1,1500)`,[eventId]);
-  await db.query(`insert into actv_payments.events(event_id,organizer_id,online_enabled)
-    values($1,'00000000-0000-4000-8000-000000000ac7',true)`,[eventId]);
+    folio_inicial,cupo_maximo) values($1,'Carrera de prueba Edge',current_date+7,'ACTV','5k','Individual',350,1,1500)`,[eventId]);
+  await db.query(`insert into actv_payments.events(event_id,organizer_id,online_enabled,sandbox_fee_per_folio)
+    values($1,'00000000-0000-4000-8000-000000000ac7',true,1500)`,[eventId]);
   let next = 0;
   const checkoutMs: number[] = [];
   const webhookMs: number[] = [];

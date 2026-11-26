@@ -1,13 +1,16 @@
 'use client';
 
+
+import { useClientReady } from '../lib/use-client-ready';
+import type { Athlete, RaceEvent, Receipt, StaffProfile, StaffScreenProps } from '../lib/legacy-types';
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import QRCode from 'react-qr-code';
-import { Search, PlusCircle, X, Ticket, UserPlus, Printer, MessageCircle, ShieldCheck, Calendar, Store, Users, Map as MapIcon, Flag, ChevronDown } from 'lucide-react';
+import { Search, PlusCircle, X, Ticket, UserPlus, Printer, MessageCircle, Calendar, Store, Users, Map as MapIcon, Flag, ChevronDown } from 'lucide-react';
 import CajaCobros, { type Cart, type StaffOrder } from './CajaCobros';
 
-const calcularEdadAlEvento = (fechaNacimiento: string, fechaEvento: string) => {
+const calcularEdadAlEvento = (fechaNacimiento: string | undefined, fechaEvento: string | undefined) => {
   if (!fechaNacimiento || !fechaEvento) return 'No definida';
   const nac = new Date(fechaNacimiento);
   const ev = new Date(fechaEvento);
@@ -19,21 +22,20 @@ const calcularEdadAlEvento = (fechaNacimiento: string, fechaEvento: string) => {
   return isNaN(edad) ? 'No definida' : `${edad} años`;
 };
 
-export default function TabCaja({ atletas, eventos, recargarDatos, userRole, userId }: any) {
-  const [isMounted, setIsMounted] = useState(false);
-  useEffect(() => { setIsMounted(true); }, []);
+export default function TabCaja({ atletas, eventos, recargarDatos, userRole, userId }: Omit<StaffScreenProps, 'clubes'>) {
+  const isMounted = useClientReady();
 
   const [enviando, setEnviando] = useState(false);
-  const [atletasSeleccionados, setAtletasSeleccionados] = useState<any[]>([]);
-  const [eventoSeleccionado, setEventoSeleccionado] = useState<any | null>(null);
+  const [atletasSeleccionados, setAtletasSeleccionados] = useState<Athlete[]>([]);
+  const [eventoSeleccionado, setEventoSeleccionado] = useState<RaceEvent | null>(null);
 
   const [paquetesAtletas, setPaquetesAtletas] = useState<Record<string, 1 | 2>>({});
 
   const [busquedaAtleta, setBusquedaAtleta] = useState('');
   const [mostrarDropdown, setMostrarDropdown] = useState(false);
   const [showQuickRegister, setShowQuickRegister] = useState(false);
-  const [ticketReciente, setTicketReciente] = useState<any | null>(null);
-  
+  const [ticketReciente, setTicketReciente] = useState<Receipt | null>(null);
+
   const [cobroEnCurso, setCobroEnCurso] = useState(false);
 
   const [idReimpresion, setIdReimpresion] = useState('');
@@ -46,7 +48,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
   const [nombreCajero, setNombreCajero] = useState('');
 
   const [aceptoTerminos, setAceptoTerminos] = useState(false);
-  
+
   const [ladaTelefono, setLadaTelefono] = useState('+52');
   const [ladaEmergencia, setLadaEmergencia] = useState('+52');
 
@@ -61,24 +63,25 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
     const cargarDatosIniciales = async () => {
       if (userId) {
         const { data: perfil, error: errPerfil } = await supabase.from('perfiles').select('*').eq('id', userId).maybeSingle();
-        const perfilData = perfil as any;
-        
+        const perfilData = perfil as StaffProfile | null;
+
         if (perfilData && !errPerfil) {
           const dbRol = String(perfilData.rol || '').toLowerCase();
-          setRolReal(perfilData.rol || userRole);
+          setRolReal(perfilData.rol || userRole || '');
 
           if (perfilData.nombre_completo) {
             setNombreCajero(perfilData.nombre_completo);
           } else {
-            setNombreCajero(perfilData.rol || userRole);
+            setNombreCajero(perfilData.rol || userRole || '');
           }
 
           if (dbRol.includes('admin') || dbRol.includes('pdv')) {
             setVerTodosEventos(true);
           } else {
-            let evAsignados = perfilData.eventos_asignados || perfilData.eventos_assigned || [];
+            let evAsignados: string[] | string = perfilData.eventos_asignados || perfilData.eventos_assigned || [];
             if (typeof evAsignados === 'string') {
-              try { evAsignados = JSON.parse(evAsignados); } catch(e) { evAsignados = [evAsignados]; }
+              const rawAssigned = evAsignados;
+              try { evAsignados = JSON.parse(rawAssigned); } catch { evAsignados = [rawAssigned]; }
             }
             if (Array.isArray(evAsignados)) {
               setMisEventosPermitidos(evAsignados);
@@ -93,19 +96,19 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
       }
 
       const { data: clubesData } = await supabase.from('clubes').select('nombre');
-      if (clubesData) setClubesDB(clubesData.map((c: any) => c.nombre));
+      if (clubesData) setClubesDB(clubesData.map((c) => c.nombre));
     };
-    
+
     cargarDatosIniciales();
   }, [userId, userRole]);
 
-  const rawClubs = [...clubesDB, ...(atletas || []).map((a: any) => a.club)].filter(Boolean);
+  const rawClubs = [...clubesDB, ...(atletas || []).map((a) => a.club)].filter(Boolean);
   const clubesExistentes = Array.from(new Set(rawClubs)).map(c => String(c).trim()).sort((a, b) => a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' }));
-  
+
   const eventosSeguros = eventos || [];
-  const eventosVisibles = verTodosEventos 
-    ? eventosSeguros 
-    : eventosSeguros.filter((ev: any) => misEventosPermitidos.includes(ev.id));
+  const eventosVisibles = verTodosEventos
+    ? eventosSeguros
+    : eventosSeguros.filter((ev) => misEventosPermitidos.includes(ev.id));
 
   const idsEventos = eventosVisibles.map((evento: { id: string }) => evento.id).join(',');
   useEffect(() => {
@@ -123,7 +126,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
     return () => { active = false; };
   }, [idsEventos, cobroEnCurso]);
 
-  const agregarAtletaLista = (atleta: any) => {
+  const agregarAtletaLista = (atleta: Athlete) => {
     if (!atletasSeleccionados.some(a => a.id === atleta.id)) {
       setAtletasSeleccionados([...atletasSeleccionados, atleta]);
     }
@@ -169,7 +172,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
 
       setTicketReciente({
         id_db: data.id,
-        fecha_hora: data.created_at,
+        fecha_hora: data.created_at || new Date().toISOString(),
         evento_nombre: data.eventos.nombre_carrera,
         evento_fecha: data.eventos.fecha,
         paquete_comprado: data.paquete_comprado,
@@ -186,47 +189,47 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
     }
   };
 
-  const handleSubmitQuickAtleta = async (e: any) => {
+  const handleSubmitQuickAtleta = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!aceptoTerminos) { alert("Por favor, acepta los términos y condiciones para continuar."); return; }
-    
-    const normalizarTexto = (txt: string) => 
+
+    const normalizarTexto = (txt: string) =>
       String(txt || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-    
-    const obtenerUltimos4 = (tel: string) => 
+
+    const obtenerUltimos4 = (tel: string) =>
       String(tel || '').replace(/\D/g, '').slice(-4);
 
     const inputNombre = normalizarTexto(formQuickAtleta.nombre);
     const inputApellido = normalizarTexto(formQuickAtleta.apellido);
-    
+
     const telLimpioInput = formQuickAtleta.telefono.replace(/\D/g, '');
     const telefonoCompletoInput = `${ladaTelefono}${telLimpioInput}`;
     const inputUltimos4 = obtenerUltimos4(telefonoCompletoInput);
 
-    const atletaDuplicado = (atletas || []).find((atl: any) => {
+    const atletaDuplicado = (atletas || []).find((atl) => {
       const atlNombre = normalizarTexto(atl.nombre);
       const atlApellido = normalizarTexto(atl.apellido);
       const atlUltimos4 = obtenerUltimos4(atl.telefono);
-      
+
       return atlNombre === inputNombre && atlApellido === inputApellido && atlUltimos4 === inputUltimos4;
     });
 
     if (atletaDuplicado) {
       alert(`⚠️ ¡Atleta ya registrado!\n\nSe detectó una coincidencia en el sistema:\n• Nombre: ${atletaDuplicado.nombre} ${atletaDuplicado.apellido}\n• Teléfono: ${atletaDuplicado.telefono}\n\nNo es necesario crearlo de nuevo, búscalo directamente en la barra superior para agregarlo a la venta.`);
-      return; 
+      return;
     }
 
     setEnviando(true);
-    const datos: any = { ...formQuickAtleta };
+    const datos: Record<keyof typeof formQuickAtleta, string | null> & { usuario_id?: string | null } = { ...formQuickAtleta };
     if (!datos.email || datos.email.trim() === '') datos.email = null;
     if (!datos.fecha_nacimiento || datos.fecha_nacimiento.trim() === '') datos.fecha_nacimiento = null;
     if (!datos.club || datos.club.trim() === '') datos.club = null;
-    
-    const emerLimpio = datos.telefono_emergencia.replace(/\D/g, '');
-    
+
+    const emerLimpio = formQuickAtleta.telefono_emergencia.replace(/\D/g, '');
+
     datos.telefono = telefonoCompletoInput;
     datos.telefono_emergencia = `${ladaEmergencia}${emerLimpio}`;
-    datos.usuario_id = userId; 
+    datos.usuario_id = userId;
 
     const { data, error } = await supabase.from('atletas').insert([datos]).select();
     if (error) {
@@ -252,9 +255,9 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
       package: paquete(athlete.id, index),
     })),
   } : null;
-  const totalEstimado = carrito?.items.reduce((total, item) =>
+  const totalEstimado = eventoSeleccionado ? carrito?.items.reduce((total, item) =>
     total + Math.round(Number(item.package === 2 ? eventoSeleccionado.precio_2 : eventoSeleccionado.precio_1) * 100),
-  0) ?? 0;
+  0) ?? 0 : 0;
   const atletasPorId = useMemo(() => new Map((atletas || []).map((atleta: { id: string }) => [atleta.id, atleta])), [atletas]);
 
   const mostrarRecibo = (order: StaffOrder, cart: Cart, method: 'cash' | 'terminal') => {
@@ -292,7 +295,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
 
   return (
     <section className="flex flex-col relative pb-16 animate-in fade-in slide-in-from-bottom-2 duration-500">
-      
+
       <style jsx global>{`
         @media print {
           @page { margin: 0; size: 58mm auto; }
@@ -308,17 +311,17 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
             line-height: 1.2;
             color: black;
           }
-          .print-area { display: none !important; } 
+          .print-area { display: none !important; }
         }
       `}</style>
 
       {/* MENÚ SUPERIOR TIPO WORDPRESS ADMIN */}
       <div className="bg-white border-b border-slate-200 px-5 py-3 flex flex-col md:flex-row justify-between items-center gap-4 shadow-sm rounded-t-2xl no-print z-10">
         <div className="flex items-center gap-4">
-          <img 
-            src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png" 
-            alt="logo actv" 
-            className="h-9 w-auto object-contain transition-transform duration-300 hover:scale-105" 
+          <img
+            src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png"
+            alt="logo actv"
+            className="h-9 w-auto object-contain transition-transform duration-300 hover:scale-105"
           />
           <div className="flex flex-col">
             <h1 className="text-sm font-black uppercase tracking-tight text-slate-900 flex items-center leading-none">
@@ -330,12 +333,12 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
             </p>
           </div>
         </div>
-        
+
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
           <div className="flex bg-slate-50 border border-slate-200/80 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-slate-900/5 focus-within:border-slate-400 transition-all">
-            <input 
-              type="text" 
-              placeholder="Reimprimir (Ej. 080)" 
+            <input
+              type="text"
+              placeholder="Reimprimir (Ej. 080)"
               className="px-3.5 py-2 text-xs outline-none w-full md:w-40 bg-transparent text-slate-900 placeholder:text-slate-400 font-medium tracking-wide"
               value={idReimpresion}
               onChange={(e) => setIdReimpresion(e.target.value)}
@@ -344,9 +347,9 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
               <Printer size={14}/>
             </button>
           </div>
-          <button 
-            type="button" 
-            onClick={() => { setLadaTelefono('+52'); setLadaEmergencia('+52'); setShowQuickRegister(true); }} 
+          <button
+            type="button"
+            onClick={() => { setLadaTelefono('+52'); setLadaEmergencia('+52'); setShowQuickRegister(true); }}
             disabled={cobroEnCurso}
             className="bg-slate-900 text-white text-xs font-semibold py-2 px-4 rounded-xl flex items-center hover:bg-black transition-all shadow-sm active:scale-[0.98] disabled:opacity-45"
           >
@@ -358,17 +361,17 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
       {/* ÁREA DE TRABAJO PRINCIPAL */}
       <div className="bg-white p-5 md:p-8 flex-grow rounded-b-2xl shadow-sm border-x border-b border-slate-200 w-full no-print">
         <fieldset disabled={cobroEnCurso} inert={cobroEnCurso} className="space-y-8 disabled:opacity-60">
-          
+
           <div className="md:col-span-2 relative">
             <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">1. Buscar y Agregar Corredores *</label>
             <div className="relative">
               <Search className="absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
               <input type="text" placeholder="Nombre o teléfono..." value={busquedaAtleta} onChange={(e) => {setBusquedaAtleta(e.target.value); setMostrarDropdown(true);}} onFocus={() => setMostrarDropdown(true)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pl-11 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 text-slate-900 placeholder:text-slate-400 text-sm shadow-sm transition-all" />
             </div>
-            
+
             {mostrarDropdown && busquedaAtleta && (
               <ul className="absolute z-20 w-full bg-white border border-slate-200 shadow-xl rounded-xl mt-2 overflow-hidden max-h-60 overflow-y-auto divide-y divide-slate-50">
-                {(atletas || []).filter((a: any) => (a.nombre + ' ' + a.apellido + ' ' + a.telefono).toLowerCase().includes(busquedaAtleta.toLowerCase())).slice(0, 20).map((a: any) => (
+                {(atletas || []).filter((a) => (a.nombre + ' ' + a.apellido + ' ' + a.telefono).toLowerCase().includes(busquedaAtleta.toLowerCase())).slice(0, 20).map((a) => (
                   <li key={a.id} className="p-3.5 hover:bg-slate-50 cursor-pointer flex justify-between items-center transition-colors" onClick={() => agregarAtletaLista(a)}>
                     <div><p className="font-bold text-slate-900 text-sm">{a.nombre} {a.apellido}</p><p className="text-[11px] font-medium text-slate-500 mt-0.5">{a.telefono}</p></div>
                     <PlusCircle className="text-slate-400 w-5 h-5 hover:text-slate-900 transition-colors" />
@@ -376,7 +379,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                 ))}
               </ul>
             )}
-            
+
             <div className="mt-3 flex flex-wrap gap-2">
               {atletasSeleccionados.map(a => (
                 <span key={a.id} className="bg-slate-900 text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-2 shadow-sm animate-in fade-in zoom-in duration-150">
@@ -409,24 +412,24 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
             <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-4 mt-4">
               2. {!verTodosEventos ? 'Seleccionar Carrera Permitida *' : 'Seleccionar Carrera *'}
             </label>
-            
+
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 max-h-[650px] overflow-y-auto pb-4 pt-1 px-1 custom-scrollbar">
-              {eventosVisibles.map((ev: any) => {
+              {eventosVisibles.map((ev) => {
                 const foliosUsados = cuposOcupados[String(ev.id)];
                 const lugaresDisponibles = ev.cupo_maximo == null || foliosUsados === undefined
                   ? null
                   : Number(ev.cupo_maximo) - foliosUsados;
                 const agotado = lugaresDisponibles !== null && lugaresDisponibles <= 0;
                 const esSeleccionado = eventoSeleccionado?.id === ev.id;
-                
+
                 return (
-                  <div key={ev.id} onClick={() => { 
-                    if(!agotado) { 
-                      setPaquetesAtletas({}); 
-                      setEventoSeleccionado(ev); 
-                    } 
+                  <div key={ev.id} onClick={() => {
+                    if(!agotado) {
+                      setPaquetesAtletas({});
+                      setEventoSeleccionado(ev);
+                    }
                   }} className={`relative flex flex-col h-full bg-white rounded-2xl transition-all duration-300 overflow-hidden group border ${agotado ? 'opacity-50 cursor-not-allowed border-slate-200 bg-slate-50' : esSeleccionado ? 'border-slate-900 shadow-md scale-[1.01] z-10' : 'border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 cursor-pointer'}`}>
-                    
+
                     <div className="w-full aspect-[3/4] bg-slate-50 shrink-0 relative overflow-hidden">
                       {ev.imagen_evento ? (
                         <img src={ev.imagen_evento} className={`w-full h-full object-cover object-center transition-transform duration-500 ${agotado ? 'grayscale' : 'group-hover:scale-[1.03]'}`} alt="poster" />
@@ -434,10 +437,10 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                         <div className={`w-full h-full ${agotado ? 'bg-slate-200' : 'bg-slate-900'}`}></div>
                       )}
                     </div>
-                    
+
                     <div className="p-4 flex flex-col flex-grow justify-between gap-3 bg-white">
                       <h4 className="font-bold text-slate-900 text-sm leading-snug line-clamp-2 group-hover:text-black transition-colors">{ev.nombre_carrera}</h4>
-                      
+
                       <div className="flex flex-col gap-2 mt-auto pt-2 border-t border-slate-50">
                         <span className="text-[10px] text-slate-400 font-bold flex items-center tracking-wide"><Calendar className="w-3.5 h-3.5 mr-1.5 text-slate-400"/>{ev.fecha}</span>
                         <div className="flex justify-between items-center w-full mt-1">
@@ -463,19 +466,19 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
           {eventoSeleccionado && atletasSeleccionados.length > 0 && (
             <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 animate-in fade-in slide-in-from-bottom-2 duration-200">
               <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">3. Desglose de Paquetes *</label>
-              
+
               <div className="space-y-2.5">
                 {atletasSeleccionados.map((a, index) => {
                   const currentPkg = paquete(a.id, index);
                   const labelRelevo = index === 0 ? 'Capitán / Titular (Costo Base)' : `Corredor ${index + 1} (Relevo Adicional)`;
-                  
+
                   return (
                     <div key={a.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm gap-3 transition-all hover:border-slate-300">
                       <div>
                         <p className="font-bold text-slate-900 text-sm tracking-tight">{a.nombre} {a.apellido}</p>
                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{esRelevo ? labelRelevo : `Corredor ${index + 1}`}</p>
                       </div>
-                      
+
                       <div className="relative w-full sm:w-auto">
                         <select
                           value={currentPkg}
@@ -521,7 +524,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 no-print overflow-y-auto">
           <div className="bg-white p-6 md:p-10 max-w-xl w-full rounded-3xl shadow-2xl relative my-auto border border-slate-200/80 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
             <button type="button" onClick={() => setShowQuickRegister(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full transition-colors z-20"><X size={18}/></button>
-            
+
             <div className="text-center mb-6">
               <div className="bg-slate-50 border border-slate-100 w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3">
                 <UserPlus className="w-6 h-6 text-slate-900"/>
@@ -529,7 +532,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
               <h3 className="text-xl font-black text-slate-900 tracking-tight">Registro Express</h3>
               <p className="text-xs font-medium text-slate-400 mt-1">Añade un nuevo atleta al padrón instantáneamente.</p>
             </div>
-            
+
             <form onSubmit={handleSubmitQuickAtleta} className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -540,7 +543,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Apellido(s) *</label>
                   <input required value={formQuickAtleta.apellido} onChange={(e) => setFormQuickAtleta({...formQuickAtleta, apellido: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none text-slate-900 focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-sm font-medium" />
                 </div>
-                
+
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Género</label>
                   <select value={formQuickAtleta.genero} onChange={(e) => setFormQuickAtleta({...formQuickAtleta, genero: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none text-slate-900 focus:border-slate-400 transition-all text-sm font-semibold appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2394a3b8%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_12px_center] bg-[length:16px_16px] pr-8 cursor-pointer">
@@ -559,7 +562,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Club / Equipo</label>
                   <select value={formQuickAtleta.club} onChange={(e) => setFormQuickAtleta({...formQuickAtleta, club: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none text-slate-900 focus:border-slate-400 transition-all text-sm font-semibold appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2394a3b8%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_12px_center] bg-[length:16px_16px] pr-8 cursor-pointer">
                     <option value="">Libre (Opcional)</option>
-                    {clubesExistentes.map((club: any, idx: number) => (
+                    {clubesExistentes.map((club, idx: number) => (
                       <option key={idx} value={club}>{club}</option>
                     ))}
                   </select>
@@ -572,8 +575,8 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Celular *</label>
                   <div className="flex bg-slate-50 border border-slate-200 rounded-xl overflow-hidden focus-within:border-slate-400 focus-within:ring-4 focus-within:ring-slate-900/5 transition-all">
-                    <select 
-                      value={ladaTelefono} 
+                    <select
+                      value={ladaTelefono}
                       onChange={(e) => setLadaTelefono(e.target.value)}
                       className="bg-slate-100 border-r border-slate-200 text-xs font-bold px-3 py-3 outline-none text-slate-700 cursor-pointer"
                     >
@@ -587,8 +590,8 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1 text-red-500">Emergencia *</label>
                   <div className="flex bg-red-50/30 border border-red-200 rounded-xl overflow-hidden focus-within:border-red-400 focus-within:ring-4 focus-within:ring-red-900/5 transition-all">
-                    <select 
-                      value={ladaEmergencia} 
+                    <select
+                      value={ladaEmergencia}
                       onChange={(e) => setLadaEmergencia(e.target.value)}
                       className="bg-red-100/40 border-r border-red-200 text-xs font-bold px-3 py-3 outline-none text-slate-700 cursor-pointer"
                     >
@@ -598,7 +601,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                     <input type="tel" required placeholder="10 dígitos" value={formQuickAtleta.telefono_emergencia} onChange={(e) => setFormQuickAtleta({...formQuickAtleta, telefono_emergencia: e.target.value})} className="w-full bg-transparent p-3 outline-none text-slate-900 text-sm font-medium" />
                   </div>
                 </div>
-                
+
                 <div className="sm:col-span-2 space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Ciudad Residencia *</label>
                   <input required value={formQuickAtleta.ciudad} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none text-slate-900 focus:border-slate-400 transition-all text-sm font-medium" onChange={(e) => setFormQuickAtleta({...formQuickAtleta, ciudad: e.target.value})} />
@@ -660,7 +663,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
             </div>
           </div>
           <div className="flex-grow space-y-6">
-            {ticketReciente.atletas_data.map((atleta: any, index: number) => (
+            {ticketReciente.atletas_data.map((atleta, index: number) => (
               <div key={index} className="border-2 border-slate-200 p-6 rounded-xl relative">
                 <div className="absolute top-4 right-6 text-right">
                   <p className="text-[10px] font-black uppercase text-gray-400">Número de Folio</p>
@@ -685,7 +688,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
           </div>
           <div className="mt-auto pt-8 border-t-2 border-black flex justify-between items-end">
               <div className="w-2/3">
-                  <p className="text-[10px] text-justify leading-tight text-gray-700">"Yo, {ticketReciente.corredores}, declaro que participo voluntariamente, asumo los riesgos físicos y libero a ACTV y organizadores de toda responsabilidad por lesiones o incidentes derivados del evento. Autorizo el uso de mi imagen para fines publicitarios..."</p>
+                  <p className="text-[10px] text-justify leading-tight text-gray-700">&quot;Yo, {ticketReciente.corredores}, declaro que participo voluntariamente, asumo los riesgos físicos y libero a ACTV y organizadores de toda responsabilidad por lesiones o incidentes derivados del evento. Autorizo el uso de mi imagen para fines publicitarios...&quot;</p>
                   <div className="mt-16 border-t border-black w-64 pt-2 text-center text-[10px] font-bold">Firma de Conformidad</div>
               </div>
               <div className="text-right text-[10px] font-bold text-gray-700">
@@ -703,7 +706,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
         <div id="ticket-58mm" className="hidden print:block font-bold">
           {[1, 2].map((copia) => (
             <div key={copia} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-              
+
               <div style={{ textAlign: 'center', marginBottom: '5px' }}>
                 <img src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png" alt="logo actv" style={{ width: '30mm', height: 'auto', margin: '0 auto 5px auto', display: 'block', filter: 'grayscale(100%) contrast(1.5)' }} />
                 <h2 style={{ fontSize: '15pt', margin: 0, fontWeight: '900' }}>ACTV SaaS</h2>
@@ -711,15 +714,15 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                 <p style={{ fontSize: '9pt', margin: 0, padding: '2px', backgroundColor: 'black', color: 'white' }}>{copia === 1 ? 'ORIGINAL - CLIENTE' : 'COPIA - ORGANIZADOR'}</p>
                 <p style={{ marginTop: '5px' }}>==========================</p>
               </div>
-              
+
               <p><strong>Ticket:</strong> {ticketReciente.order_id || ticketReciente.id_db || 'N/A'}</p>
               {/* ✅ AQUÍ SE IMPRIME EL CAJERO ORIGINAL EN LA MINIPRESORA */}
               <p><strong>Cajero:</strong> {ticketReciente.cajero_original || nombreCajero || 'Usuario'}</p>
-              <p><strong>Fecha:</strong> {new Date(ticketReciente.fecha_hora || Date.now()).toLocaleString('es-MX')}</p>
+              <p><strong>Fecha:</strong> {new Date(ticketReciente.fecha_hora).toLocaleString('es-MX')}</p>
               <p><strong>Evento:</strong> {ticketReciente.evento_nombre}<br/><strong>Fecha:</strong> {ticketReciente.evento_fecha ? new Date(ticketReciente.evento_fecha + 'T12:00:00').toLocaleDateString('es-MX', {day: '2-digit', month: 'long', year: 'numeric'}).replace(/ de /g, '-') : ''}</p>
               <p>==========================</p>
-              
-              {ticketReciente.atletas_data.map((atleta: any, idx: number) => (
+
+              {ticketReciente.atletas_data.map((atleta, idx: number) => (
                 <div key={idx} style={{ marginBottom: '8px' }}>
                   <p style={{ fontSize: '11pt', fontWeight: '900' }}>{idx + 1}. {atleta.nombre} {atleta.apellido}</p>
                   <p style={{ fontSize: '12pt', fontWeight: '900', color: 'black' }}>FOLIO: {ticketReciente.folios_array[idx]}</p>
@@ -735,7 +738,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
               <p><strong>Paquete:</strong> {ticketReciente.paquete_comprado}</p>
               {ticketReciente.metodo_pago && <p><strong>Método:</strong> {ticketReciente.metodo_pago}</p>}
               <p style={{ fontSize: '12pt', fontWeight: '900' }}>{ticketReciente.historico ? 'IMPORTE REGISTRADO:' : 'PAGO TOTAL:'} ${ticketReciente.monto_total} MXN</p>
-              
+
               <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
                 <QRCode value={ticketReciente.folios} size={90} style={{ height: "auto", maxWidth: "25mm", width: "25mm" }} />
               </div>
@@ -757,7 +760,7 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
                 <p style={{ marginTop: '5px' }}>¡GRACIAS POR CORRER CON ACTV!</p>
                 <p style={{ marginTop: '5px', fontWeight: '900' }}>actv.mx</p>
               </div>
-              
+
               {copia === 1 && <div style={{ borderBottom: '1px dashed black', margin: '2.5mm 0' }}></div>}
             </div>
           ))}

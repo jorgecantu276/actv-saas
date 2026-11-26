@@ -9,16 +9,25 @@ export interface Registration {
 }
 
 export interface Order {
+  provider?: 'stripe' | 'mercadopago' | 'cash';
+  mercadopago_collector_id?: string | null;
+  provider_preference_id?: string | null;
+  mercadopago_claim_id?: string | null;
+  mercadopago_payment_id?: string | null;
   order_id: string;
+  event_id?: string;
   status_token: string;
   state: 'pending' | 'issued' | 'closed' | 'review' | 'voided';
   channel: 'online' | 'terminal' | 'cash';
   amount: number;
+  application_fee_amount: number;
+  buyer_email: string | null;
   currency: string;
   account_id: string | null;
   live_mode: boolean;
   reader_id: string | null;
   expires_at: string;
+  created_at?: string;
   items: { name: string; amount: number }[];
   provider_session_id: string | null;
   provider_payment_id: string | null;
@@ -29,6 +38,7 @@ export function orderResult(order: Order) {
   const registrations = order.state === 'issued' ? order.registrations ?? [] : [];
   return {
     orderId: order.order_id,
+    provider: order.provider ?? (order.channel === 'cash' ? 'cash' : 'stripe'),
     status: order.state,
     amount: order.amount,
     currency: order.currency,

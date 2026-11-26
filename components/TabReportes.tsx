@@ -1,6 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+
+import { useClientReady } from '../lib/use-client-ready';
+import type { Registration, AthleteHistory, Receipt, StaffScreenProps } from '../lib/legacy-types';
+import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import QRCode from 'react-qr-code';
@@ -18,7 +22,7 @@ const capitalizarNombres = (texto: string | null | undefined) => {
     .join(' ');
 };
 
-const calcularEdadAlEvento = (fechaNacimiento: string, fechaEvento: string) => {
+const calcularEdadAlEvento = (fechaNacimiento: string | undefined, fechaEvento: string | undefined) => {
   if (!fechaNacimiento || !fechaEvento) return 'No definida';
   const nac = new Date(fechaNacimiento);
   const ev = new Date(fechaEvento);
@@ -30,7 +34,7 @@ const calcularEdadAlEvento = (fechaNacimiento: string, fechaEvento: string) => {
   return isNaN(edad) ? 'No definida' : `${edad} años`;
 };
 
-const calcularEdadNumero = (fechaNacimiento: string, fechaEvento: string) => {
+const calcularEdadNumero = (fechaNacimiento: string | undefined, fechaEvento: string | undefined) => {
   if (!fechaNacimiento || !fechaEvento) return null;
   const nac = new Date(fechaNacimiento);
   const ev = new Date(fechaEvento);
@@ -53,12 +57,11 @@ const obtenerCategoria = (edad: number | null) => {
   return '70 y más';
 };
 
-export default function TabReportes({ eventos, userRole, userId }: any) {
-  const [isMounted, setIsMounted] = useState(false);
-  useEffect(() => { setIsMounted(true); }, []);
+export default function TabReportes({ eventos, userRole, userId }: Pick<StaffScreenProps, 'eventos' | 'userRole' | 'userId'>) {
+  const isMounted = useClientReady();
 
-  const [inscripciones, setInscripciones] = useState<any[]>([]);
-  
+  const [inscripciones, setInscripciones] = useState<Registration[]>([]);
+
   const [filtroEvento, setFiltroEvento] = useState('');
   const [busqueda, setBusqueda] = useState('');
   const [orden, setOrden] = useState('fecha_desc');
@@ -67,23 +70,18 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
 
   const [paginaActual, setPaginaActual] = useState(1);
   const inscripcionesPorPagina = 25;
+  const cambiarBusqueda = (value: string) => { setBusqueda(value); setPaginaActual(1); };
+  const cambiarFiltroEvento = (value: string) => { setFiltroEvento(value); setPaginaActual(1); };
+  const cambiarOrden = (value: string) => { setOrden(value); setPaginaActual(1); };
 
   // ESTADOS PARA EL HISTORIAL DEL ATLETA
-  const [atletaHistorial, setAtletaHistorial] = useState<any | null>(null);
+  const [atletaHistorial, setAtletaHistorial] = useState<AthleteHistory | null>(null);
   const [ordenHistorial, setOrdenHistorial] = useState('reciente');
 
-  useEffect(() => {
-    setPaginaActual(1);
-  }, [busqueda, filtroEvento, orden]);
 
-  const [ticketReciente, setTicketReciente] = useState<any | null>(null);
+  const [ticketReciente, setTicketReciente] = useState<Receipt | null>(null);
 
-  useEffect(() => {
-    cargarDatosSeguros();
-  }, [userId, userRole]);
-
-  const cargarDatosSeguros = async () => {
-    setCargando(true);
+  const consultarDatosSeguros = useCallback(async () => {
     let eventosPermitidos: string[] = [];
 
     if (userRole === 'Moderador' && userId) {
@@ -91,12 +89,10 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
       if (perfil && perfil.eventos_asignados) {
         eventosPermitidos = perfil.eventos_asignados;
       }
-      setMisEventosPermitidos(eventosPermitidos);
+
 
       if (eventosPermitidos.length === 0) {
-        setInscripciones([]);
-        setCargando(false);
-        return;
+        return { data: [], eventosPermitidos };
       }
     }
 
@@ -112,12 +108,22 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
     }
 
     const { data } = await query;
-    if (data) setInscripciones(data);
+    return { data, eventosPermitidos };
+  }, [userId, userRole]);
 
-    setCargando(false);
-  };
+  useEffect(() => {
+    let active = true;
+    void consultarDatosSeguros().then(({ data, eventosPermitidos }) => {
+      if (!active) return;
+      if (userRole === 'Moderador') setMisEventosPermitidos(eventosPermitidos);
+      if (data) setInscripciones(data);
+      setCargando(false);
+    });
+    return () => { active = false; };
+  }, [consultarDatosSeguros, userRole]);
 
-  let inscritosProcesados = inscripciones.filter(i => {
+
+  const inscritosProcesados = inscripciones.filter(i => {
     const coincideEvento = filtroEvento === '' || i.evento_id === filtroEvento;
     const nombreCompleto = `${i.atletas?.nombre} ${i.atletas?.apellido}`.toLowerCase();
     const coincideBusqueda = nombreCompleto.includes(busqueda.toLowerCase()) || i.folio_asignado.includes(busqueda);
@@ -152,7 +158,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
     }
   };
 
-  let historialProcesado = atletaHistorial ? [...atletaHistorial.inscripciones] : [];
+  const historialProcesado = atletaHistorial ? [...atletaHistorial.inscripciones] : [];
   historialProcesado.sort((a, b) => {
     if (ordenHistorial === 'reciente') return new Date(b.eventos?.fecha || 0).getTime() - new Date(a.eventos?.fecha || 0).getTime();
     if (ordenHistorial === 'antiguo') return new Date(a.eventos?.fecha || 0).getTime() - new Date(b.eventos?.fecha || 0).getTime();
@@ -170,22 +176,22 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
       const edadNum = calcularEdadNumero(i.atletas?.fecha_nacimiento, i.eventos?.fecha);
       const categoria = obtenerCategoria(edadNum);
       return [
-        i.folio_asignado, 
+        i.folio_asignado,
         new Date(i.created_at).toLocaleDateString('es-MX'),
-        capitalizarNombres(i.atletas?.nombre), 
-        capitalizarNombres(i.atletas?.apellido), 
+        capitalizarNombres(i.atletas?.nombre),
+        capitalizarNombres(i.atletas?.apellido),
         i.atletas?.fecha_nacimiento || 'N/A',
-        edadNum !== null ? edadNum : 'N/A', 
+        edadNum !== null ? edadNum : 'N/A',
         categoria,
-        i.atletas?.telefono || '', 
-        i.atletas?.telefono_emergencia || '', 
-        i.atletas?.club || 'Libre', 
-        i.atletas?.ciudad || '', 
-        i.atletas?.genero || '', 
-        i.atletas?.talla_playera || '', 
-        i.paquete_comprado || '', 
-        i.perfiles?.nombre_completo || 'No registrado', 
-        i.monto_pagado || '0', 
+        i.atletas?.telefono || '',
+        i.atletas?.telefono_emergencia || '',
+        i.atletas?.club || 'Libre',
+        i.atletas?.ciudad || '',
+        i.atletas?.genero || '',
+        i.atletas?.talla_playera || '',
+        i.paquete_comprado || '',
+        i.perfiles?.nombre_completo || 'No registrado',
+        i.monto_pagado || '0',
         i.eventos?.nombre_carrera || ''
       ];
     });
@@ -202,10 +208,10 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
   // =======================================================
   const exportarXLSX = () => {
     let tablaHTML = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8" /></head><body><table>';
-    
+
     tablaHTML += '<tr><th>Folio</th><th>Fecha de Registro</th><th>Nombres</th><th>Apellidos</th><th>Fecha de Nacimiento</th><th>Edad al Evento</th><th>Categoría</th><th>Teléfono</th><th>Emergencia</th><th>Club/Equipo</th><th>Ciudad</th><th>Género</th><th>Talla</th><th>Paquete</th><th>Cajero</th><th>Pago</th><th>Carrera</th></tr>';
-    
-    inscritosProcesados.forEach((i: any) => {
+
+    inscritosProcesados.forEach((i) => {
       const edadNum = calcularEdadNumero(i.atletas?.fecha_nacimiento, i.eventos?.fecha);
       const categoria = obtenerCategoria(edadNum);
 
@@ -229,9 +235,9 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
         <td>${i.eventos?.nombre_carrera || ''}</td>
       </tr>`;
     });
-    
+
     tablaHTML += '</table></body></html>';
-    
+
     const blob = new Blob([tablaHTML], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -239,7 +245,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  const reimprimirTicket = async (inscripcion: any) => {
+  const reimprimirTicket = async (inscripcion: Registration) => {
     const pago = await consultarPago(inscripcion.id).catch(() => null);
     if (!pago || !puedeReimprimir(pago)) {
       alert('Este folio no tiene un pago vigente verificable. Consulta conciliación.');
@@ -247,7 +253,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
     }
     setTicketReciente({
       id_db: inscripcion.id,
-      fecha_hora: inscripcion.created_at,
+      fecha_hora: inscripcion.created_at || new Date().toISOString(),
       evento_nombre: inscripcion.eventos?.nombre_carrera,
       evento_fecha: inscripcion.eventos?.fecha,
       paquete_comprado: inscripcion.paquete_comprado,
@@ -256,9 +262,9 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
       folios_array: [inscripcion.folio_asignado],
       corredores: `${capitalizarNombres(inscripcion.atletas?.nombre)} ${capitalizarNombres(inscripcion.atletas?.apellido)}`,
       atletas_data: [inscripcion.atletas],
-      cajero: inscripcion.perfiles?.nombre_completo || 'Usuario', 
+      cajero: inscripcion.perfiles?.nombre_completo || 'Usuario',
       historico: pago.actv_eligible !== true,
-      esReimpresion: true 
+      esReimpresion: true
     });
   };
 
@@ -269,19 +275,19 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
     window.open(`https://wa.me/?text=${encodeURIComponent(msj)}`, '_blank');
   };
 
-  const eventosDropdown = userRole === 'Moderador' 
-    ? eventos.filter((ev: any) => misEventosPermitidos.includes(ev.id))
+  const eventosDropdown = userRole === 'Moderador'
+    ? eventos.filter((ev) => misEventosPermitidos.includes(ev.id))
     : eventos;
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-8">
-      
+
       <style jsx global>{`
         @media print {
           @page { margin: 0; size: 58mm auto; }
           html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
           body > :not(.print-area, #ticket-58mm) { display: none !important; }
-          
+
           #ticket-58mm {
             display: block !important;
             width: 58mm;
@@ -292,10 +298,13 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
             line-height: 1.2;
             color: black;
           }
-          .print-area { display: none !important; } 
+          .print-area { display: none !important; }
         }
       `}</style>
 
+      <Link href="/pagos" className="no-print inline-flex w-fit items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
+        Abrir espacio de pagos
+      </Link>
       {userRole === 'Administrador' && <ConciliacionCobros canMatch />}
 
       {/* CABECERA ENTERPRISE */}
@@ -307,7 +316,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
             </h2>
             <p className="text-xs font-medium text-slate-500 mt-1">Audita y exporta las inscripciones de todas las carreras.</p>
           </div>
-          
+
           <div className="flex flex-wrap gap-3 w-full xl:w-auto">
             {(userRole === 'Administrador' || userRole === 'Moderador') && (
               <>
@@ -326,33 +335,33 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
           <div className="relative group">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
-            <input 
-              type="text" 
-              placeholder="Buscar nombre o folio..." 
-              className="w-full bg-slate-50 border border-slate-200 p-3 pl-11 rounded-xl outline-none text-sm focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-slate-900 placeholder:text-slate-400 font-medium" 
-              value={busqueda} 
-              onChange={(e) => setBusqueda(e.target.value)} 
+            <input
+              type="text"
+              placeholder="Buscar nombre o folio..."
+              className="w-full bg-slate-50 border border-slate-200 p-3 pl-11 rounded-xl outline-none text-sm focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 transition-all text-slate-900 placeholder:text-slate-400 font-medium"
+              value={busqueda}
+              onChange={(e) => cambiarBusqueda(e.target.value)}
             />
           </div>
-          
+
           <div className="relative">
-            <select 
-              className="w-full bg-slate-50 border border-slate-200 p-3 px-4 rounded-xl outline-none text-sm text-slate-900 font-bold appearance-none cursor-pointer focus:border-slate-400 transition-all" 
-              value={filtroEvento} 
-              onChange={(e) => setFiltroEvento(e.target.value)}
+            <select
+              className="w-full bg-slate-50 border border-slate-200 p-3 px-4 rounded-xl outline-none text-sm text-slate-900 font-bold appearance-none cursor-pointer focus:border-slate-400 transition-all"
+              value={filtroEvento}
+              onChange={(e) => cambiarFiltroEvento(e.target.value)}
             >
               <option value="">{userRole === 'Moderador' ? 'Mis Carreras Asignadas' : 'Todas las carreras'}</option>
-              {eventosDropdown.map((ev: any) => <option key={ev.id} value={ev.id}>{ev.nombre_carrera}</option>)}
+              {eventosDropdown.map((ev) => <option key={ev.id} value={ev.id}>{ev.nombre_carrera}</option>)}
             </select>
             <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
           </div>
 
           <div className="relative">
             <ArrowUpDown className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-            <select 
-              className="w-full bg-slate-50 border border-slate-200 p-3 pl-11 rounded-xl outline-none text-sm text-slate-900 font-bold appearance-none cursor-pointer focus:border-slate-400 transition-all" 
-              value={orden} 
-              onChange={(e) => setOrden(e.target.value)}
+            <select
+              className="w-full bg-slate-50 border border-slate-200 p-3 pl-11 rounded-xl outline-none text-sm text-slate-900 font-bold appearance-none cursor-pointer focus:border-slate-400 transition-all"
+              value={orden}
+              onChange={(e) => cambiarOrden(e.target.value)}
             >
               <option value="fecha_desc">Registro (Más recientes)</option>
               <option value="fecha_asc">Registro (Más antiguos)</option>
@@ -405,15 +414,15 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                       <td className="px-6 py-4 text-slate-500 font-medium">{new Date(i.created_at).toLocaleDateString('es-MX')}</td>
                       <td className="px-6 py-4 font-black text-red-600 text-base">{i.folio_asignado}</td>
                       <td className="px-6 py-4">
-                        <button 
-                          onClick={() => verHistorial(i.atleta_id)} 
+                        <button
+                          onClick={() => verHistorial(i.atleta_id)}
                           className="font-bold text-blue-600 hover:text-blue-800 hover:underline tracking-tight text-left transition-all focus:outline-none"
                         >
                           {capitalizarNombres(i.atletas?.nombre)} {capitalizarNombres(i.atletas?.apellido)}
                         </button>
                         <p className="text-[10px] text-slate-500 font-medium mt-0.5 line-clamp-1">{i.eventos?.nombre_carrera}</p>
                       </td>
-                      
+
                       <td className="px-6 py-4">
                         <p className="font-black text-slate-700">{edadNumerica !== null ? `${edadNumerica} años` : 'N/A'}</p>
                         <span style={{ backgroundColor: colorCategoria }} className="inline-block text-[9px] text-white px-2 py-0.5 mt-1 rounded-md font-bold uppercase tracking-wider shadow-sm">
@@ -434,11 +443,11 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                         <span className="text-slate-700 font-medium block line-clamp-1">{i.paquete_comprado}</span>
                         <span className="text-[10px] text-slate-600 font-black mt-1 block">{describePago(i)}</span>
                       </td>
-                      
+
                       <td className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase">
                         {i.monto_pagado === 'WP / Online' ? <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded">WordPress</span> : (i.perfiles?.nombre_completo || 'Sistema Web')}
                       </td>
-                      
+
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
                           <button disabled={!puedeReimprimir(i)} onClick={() => reimprimirTicket(i)} className="p-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300 transition-all shadow-sm disabled:opacity-40" title="Reimprimir">
@@ -466,19 +475,19 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                 Mostrando <span className="text-slate-900">{indexPrimeraInscripcion + 1}</span> a <span className="text-slate-900">{Math.min(indexUltimaInscripcion, inscritosProcesados.length)}</span> de <span className="text-blue-600">{inscritosProcesados.length}</span> inscripciones
               </p>
               <div className="flex items-center gap-2">
-                <button 
+                <button
                   onClick={() => setPaginaActual(prev => Math.max(prev - 1, 1))}
                   disabled={paginaActual === 1}
                   className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                 >
                   <ChevronLeft className="w-5 h-5" />
                 </button>
-                
+
                 <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-1 text-[11px] font-black text-slate-700 tracking-widest uppercase">
                   <span className="mr-2">Página</span>
                   <div className="relative">
-                    <select 
-                      value={paginaActual} 
+                    <select
+                      value={paginaActual}
                       onChange={(e) => setPaginaActual(Number(e.target.value))}
                       className="bg-white border border-slate-200 rounded-lg py-1.5 pl-3 pr-7 outline-none text-xs font-bold text-slate-900 appearance-none cursor-pointer focus:border-slate-400 shadow-sm"
                     >
@@ -491,7 +500,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                   <span className="ml-2">/ {totalPaginas}</span>
                 </div>
 
-                <button 
+                <button
                   onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginas))}
                   disabled={paginaActual === totalPaginas}
                   className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
@@ -508,9 +517,9 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
       {isMounted && atletaHistorial && createPortal(
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[99999] p-4 sm:p-6 no-print overflow-y-auto">
           <div className="bg-white rounded-[32px] p-6 sm:p-8 max-w-md w-full shadow-2xl relative animate-in zoom-in-95 duration-200 my-auto max-h-[90vh] overflow-y-auto custom-scrollbar flex flex-col">
-            
+
             <button type="button" onClick={() => setAtletaHistorial(null)} className="absolute top-5 right-5 sm:top-6 sm:right-6 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-full p-2 transition-all z-20"><X size={20}/></button>
-            
+
             <div className="mb-6 pr-8 flex-shrink-0">
               <div className="bg-indigo-50 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 border border-indigo-100">
                 <History className="w-6 h-6 text-indigo-600"/>
@@ -522,9 +531,9 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
             <div className="mb-4 flex-shrink-0">
               <div className="relative">
                 <ArrowUpDown className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                <select 
-                  className="w-full bg-slate-50 border border-slate-200 p-3 pl-11 rounded-xl outline-none text-sm text-slate-900 font-bold appearance-none cursor-pointer focus:border-slate-400 transition-all" 
-                  value={ordenHistorial} 
+                <select
+                  className="w-full bg-slate-50 border border-slate-200 p-3 pl-11 rounded-xl outline-none text-sm text-slate-900 font-bold appearance-none cursor-pointer focus:border-slate-400 transition-all"
+                  value={ordenHistorial}
                   onChange={(e) => setOrdenHistorial(e.target.value)}
                 >
                   <option value="reciente">Más recientes primero</option>
@@ -538,7 +547,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
 
             {/* ✅ LISTA DE CARRERAS CON BOTÓN DE REIMPRESIÓN INCORPORADO */}
             <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-1">
-              {historialProcesado.map((insc: any) => (
+              {historialProcesado.map((insc) => (
                 <div key={insc.id} className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex flex-col hover:border-slate-300 transition-colors">
                   <div className="flex justify-between items-start mb-2">
                     <h4 className="font-bold text-slate-900 text-sm leading-tight pr-2">{insc.eventos?.nombre_carrera}</h4>
@@ -553,9 +562,9 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                       <span className="text-slate-600 font-medium block">{insc.paquete_comprado}</span>
                       <span className="font-bold text-slate-600 mt-0.5 block">{describePago(insc)}</span>
                     </div>
-                    <button 
+                    <button
                       disabled={!puedeReimprimir(insc)}
-                      onClick={() => reimprimirTicket(insc)} 
+                      onClick={() => reimprimirTicket(insc)}
                       className="flex items-center bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors font-bold shadow-sm active:scale-95"
                     >
                       <Printer className="w-3.5 h-3.5 mr-1.5" /> Ticket
@@ -564,7 +573,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                 </div>
               ))}
             </div>
-            
+
           </div>
         </div>,
         document.body
@@ -575,10 +584,10 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[999999] p-4 no-print overflow-y-auto">
           <div className="bg-white p-8 rounded-[32px] max-w-sm w-full text-center relative font-sans shadow-2xl animate-in zoom-in-95 duration-200 my-auto border border-slate-100">
             <button type="button" onClick={() => setTicketReciente(null)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full transition-all"><X size={16} /></button>
-            
+
             <h3 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">ACTV</h3>
             <p className="text-[10px] text-slate-400 border-b border-slate-200 pb-4 mb-5 uppercase font-bold tracking-widest">{ticketReciente.historico ? 'Copia histórica · pago sin validar' : 'Reimpresión de ticket'}</p>
-            
+
             <div className="text-left text-sm space-y-3 mb-6 text-slate-700">
               <p><strong className="text-slate-900">Evento:</strong> {ticketReciente.evento_nombre}</p>
               <p><strong className="text-slate-900">Corredor:</strong> {ticketReciente.corredores}</p>
@@ -587,7 +596,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                 <p className="text-4xl font-black text-red-600 tracking-tighter">{ticketReciente.folios}</p>
               </div>
             </div>
-            
+
             <div className="space-y-2.5">
               <button type="button" onClick={enviarTicketWA} className="w-full bg-slate-100 text-slate-700 hover:text-slate-900 hover:bg-slate-200 py-3.5 rounded-xl font-bold flex items-center justify-center shadow-sm transition-all active:scale-[0.98] text-sm"><MessageCircle className="mr-2 w-4 h-4"/> Enviar por WhatsApp</button>
               <button type="button" onClick={() => window.print()} className="w-full bg-slate-900 text-white py-3.5 rounded-xl font-bold flex items-center justify-center shadow-lg shadow-slate-900/20 hover:bg-black transition-all active:scale-[0.98] text-sm"><Printer className="mr-2 w-4 h-4"/> Imprimir Recibo</button>
@@ -608,7 +617,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
             </div>
           </div>
           <div className="flex-grow space-y-6">
-            {ticketReciente.atletas_data.map((atleta: any, index: number) => (
+            {ticketReciente.atletas_data.map((atleta, index: number) => (
               <div key={index} className="border-2 border-slate-200 p-6 rounded-xl relative">
                 <div className="absolute top-4 right-6 text-right">
                   <p className="text-[10px] font-black uppercase text-gray-400">Número de Folio</p>
@@ -633,7 +642,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
           </div>
           <div className="mt-auto pt-8 border-t-2 border-black flex justify-between items-end">
               <div className="w-2/3">
-                  <p className="text-[10px] text-justify leading-tight text-gray-700">"Yo, {ticketReciente.corredores}, declaro que participo voluntariamente, asumo los riesgos físicos y libero a ACTV y organizadores de toda responsabilidad por lesiones o incidentes derivados del evento. Autorizo el uso de mi imagen para fines publicitarios..."</p>
+                  <p className="text-[10px] text-justify leading-tight text-gray-700">&quot;Yo, {ticketReciente.corredores}, declaro que participo voluntariamente, asumo los riesgos físicos y libero a ACTV y organizadores de toda responsabilidad por lesiones o incidentes derivados del evento. Autorizo el uso de mi imagen para fines publicitarios...&quot;</p>
                   <div className="mt-16 border-t border-black w-64 pt-2 text-center text-[10px] font-bold">Firma de Conformidad</div>
               </div>
               <div className="text-right text-[10px] font-bold text-gray-700">
@@ -650,7 +659,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
         <div id="ticket-58mm" className="hidden print:block font-bold">
           {[1, 2].map((copia) => (
             <div key={copia} style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-              
+
               <div style={{ textAlign: 'center', marginBottom: '5px' }}>
                 <img src="https://actv.mx/wp-content/uploads/2026/02/Logo-ACTV-2026-min.png" alt="logo actv" style={{ width: '30mm', height: 'auto', margin: '0 auto 5px auto', display: 'block', filter: 'grayscale(100%) contrast(1.5)' }} />
                 <h2 style={{ fontSize: '15pt', margin: 0, fontWeight: '900' }}>ACTV SaaS</h2>
@@ -658,14 +667,14 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                 <p style={{ fontSize: '9pt', margin: 0, padding: '2px', backgroundColor: 'black', color: 'white' }}>{copia === 1 ? 'ORIGINAL - CLIENTE' : 'COPIA - ORGANIZADOR'}</p>
                 <p style={{ marginTop: '5px' }}>==========================</p>
               </div>
-              
+
               <p><strong>Ticket:</strong> {ticketReciente.id_db || 'N/A'}</p>
               <p><strong>Cajero:</strong> {ticketReciente.cajero || 'Usuario'}</p>
-              <p><strong>Fecha:</strong> {new Date(ticketReciente.fecha_hora || Date.now()).toLocaleString('es-MX')}</p>
+              <p><strong>Fecha:</strong> {new Date(ticketReciente.fecha_hora).toLocaleString('es-MX')}</p>
               <p><strong>Evento:</strong> {ticketReciente.evento_nombre}<br/><strong>Fecha del evento:</strong> {ticketReciente.evento_fecha ? new Date(ticketReciente.evento_fecha + 'T12:00:00').toLocaleDateString('es-MX', {day: '2-digit', month: 'long', year: 'numeric'}).replace(/ de /g, '-') : ''}</p>
               <p>==========================</p>
-              
-              {ticketReciente.atletas_data.map((atleta: any, idx: number) => (
+
+              {ticketReciente.atletas_data.map((atleta, idx: number) => (
                 <div key={idx} style={{ marginBottom: '8px' }}>
                   <p style={{ fontSize: '11pt', fontWeight: '900' }}>{idx + 1}. {capitalizarNombres(atleta.nombre)} {capitalizarNombres(atleta.apellido)}</p>
                   <p style={{ fontSize: '13pt', fontWeight: '900', color: 'black' }}>FOLIO: {ticketReciente.folios_array[idx]}</p>
@@ -680,7 +689,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
               <p>==========================</p>
               <p><strong>Paquete:</strong> {ticketReciente.paquete_comprado}</p>
               <p style={{ fontSize: '12pt', fontWeight: '900' }}>{ticketReciente.historico ? 'IMPORTE REGISTRADO:' : 'PAGO TOTAL:'} ${ticketReciente.monto_total} MXN</p>
-              
+
               <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
                 <QRCode value={ticketReciente.folios} size={90} style={{ height: "auto", maxWidth: "25mm", width: "25mm" }} />
               </div>
@@ -702,7 +711,7 @@ export default function TabReportes({ eventos, userRole, userId }: any) {
                 <p style={{ marginTop: '5px' }}>¡GRACIAS POR CORRER CON ACTV!</p>
                 <p style={{ marginTop: '5px', fontWeight: '900' }}>actv.mx</p>
               </div>
-              
+
               {copia === 1 && <div style={{ borderBottom: '1px dashed black', margin: '2.5mm 0' }}></div>}
             </div>
           ))}

@@ -19,9 +19,8 @@ export const organizerHandler = handler('actv-organizer-connect', async (request
   const organizer = await rpc<OrganizerContext>('actv_organizer', {
     p_operator: userId,
     p_event_id: eventId,
-    p_live_mode: live,
   });
-  if (organizer.account_id && organizer.live_mode !== live) throw new HttpError(409, 'payment_mode_mismatch');
+  if (organizer.live_mode !== live) throw new HttpError(409, 'payment_mode_mismatch');
   if (!organizer.account_id && input.action === 'status') {
     return {
       accountId: null,
@@ -36,15 +35,23 @@ export const organizerHandler = handler('actv-organizer-connect', async (request
   }
 
   const stripe = stripeClient();
-  const account = organizer.account_id
-    ? await stripe.accounts.retrieve(organizer.account_id)
-    : await stripe.accounts.create({
-      type: 'standard',
-      country: 'MX',
-      capabilities: { card_payments: { requested: true } },
+  let accountId = organizer.account_id;
+  if (!accountId) {
+    const created = await stripe.v2.core.accounts.create({
+      dashboard: 'full',
+      identity: { country: 'MX' },
+      configuration: { merchant: { capabilities: { card_payments: { requested: true } } } },
+      defaults: { responsibilities: { fees_collector: 'stripe', losses_collector: 'stripe' } },
       metadata: { actv_organizer_id: organizer.organizer_id },
     }, { idempotencyKey: `actv-organizer-${organizer.organizer_id}` });
-  if (account.type !== 'standard' || account.country !== 'MX') {
+    if (created.livemode !== live) throw new HttpError(409, 'payment_mode_mismatch');
+    accountId = created.id;
+  }
+  if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) throw new HttpError(409, 'stripe_account_unavailable');
+
+  // Stripe exposes a v1 view of v2 merchant accounts, including the flags used by account.updated.
+  const account = await stripe.accounts.retrieve(accountId);
+  if (account.id !== accountId || account.type !== 'standard' || account.country !== 'MX') {
     throw new HttpError(409, 'stripe_account_unavailable');
   }
 
@@ -69,13 +76,16 @@ export const organizerHandler = handler('actv-organizer-connect', async (request
   callback.searchParams.set('evento', eventId);
   const refresh = new URL(callback);
   refresh.searchParams.set('reanudar', '1');
-  const link = await stripe.accountLinks.create({
+  const link = await stripe.v2.core.accountLinks.create({
     account: account.id,
-    type: 'account_onboarding',
-    return_url: callback.href,
-    refresh_url: refresh.href,
+    use_case: {
+      type: 'account_onboarding',
+      account_onboarding: { return_url: callback.href, refresh_url: refresh.href },
+    },
   });
-  return { ...result, onboardingUrl: stripeRedirect(link.url, 'connect.stripe.com') };
+  if (link.livemode !== live) throw new HttpError(409, 'payment_mode_mismatch');
+  if (link.account !== account.id) throw new HttpError(409, 'stripe_account_unavailable');
+  return { ...result, onboardingUrl: stripeRedirect(link.url, 'accounts.stripe.com', 'connect.stripe.com') };
 }, true);
 
 export default { fetch: organizerHandler };

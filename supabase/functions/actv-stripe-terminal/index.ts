@@ -10,8 +10,7 @@ import {
 import {
   attachProvider,
   cancelTerminal,
-  orderMetadata,
-  providerOrderId,
+  createTerminalIntent,
   readerAction,
   type Stripe,
   stripeClient,
@@ -21,20 +20,7 @@ import {
 } from '../_shared/stripe.ts';
 
 async function createIntent(stripe: Stripe, order: Order, account: string): Promise<string> {
-  const intent = await stripe.paymentIntents.create({
-    currency: order.currency.toLowerCase(),
-    amount: order.amount,
-    allowed_payment_method_types: ['card_present'],
-    capture_method: 'automatic',
-    metadata: orderMetadata(order),
-  }, stripeOptions(account, `actv-terminal-intent-${order.order_id}`));
-  if (
-    intent.livemode !== order.live_mode || intent.amount !== order.amount ||
-    intent.currency !== order.currency.toLowerCase() ||
-    providerOrderId(intent.metadata, 'terminal') !== order.order_id
-  ) {
-    throw new HttpError(409, 'provider_terminal_mismatch');
-  }
+  const intent = await createTerminalIntent(stripe, order, account);
   await attachProvider(order, account, null, intent.id);
   return intent.id;
 }
@@ -68,8 +54,10 @@ export const terminalHandler = handler('actv-stripe-terminal', async (request) =
     let paymentId = order.provider_payment_id;
     let providerStatus: string | null = null;
     if (action === 'start' || action === 'retry') {
-      if (Date.parse(order.expires_at) <= Date.now()) throw new HttpError(409, 'reservation_expired');
-      if (!paymentId && action === 'retry') throw new HttpError(409, 'terminal_payment_not_started');
+      const expiresAt = Date.parse(order.expires_at);
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        throw new HttpError(409, 'reservation_expired');
+      }
 
       const reader = await stripe.terminal.readers.retrieve(readerId, {}, stripeOptions(account));
       if ('deleted' in reader || reader.livemode !== order.live_mode || reader.status !== 'online') {
@@ -104,6 +92,10 @@ export const terminalHandler = handler('actv-stripe-terminal', async (request) =
     if (!paymentId && action === 'cancel') {
       // Order creation can be interrupted between provider intent creation and DB attachment.
       // Recover the canonical intent through the same provider idempotency key before closing.
+      const expiresAt = Date.parse(order.expires_at);
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        throw new HttpError(409, 'reservation_expired');
+      }
       paymentId = await createIntent(stripe, order, account);
     }
     if (!paymentId) return { ...orderResult(order), provider_status: null };

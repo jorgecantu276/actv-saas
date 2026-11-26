@@ -1,105 +1,32 @@
-name: ACTV PDV
+name: ACTV candidate verification
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      deploy_production:
-        description: Deploy to pdv.actv.mx
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: build-validation-placeholder
-      SUPABASE_SERVICE_ROLE_KEY: build-validation-placeholder
-      NEXT_TELEMETRY_DISABLED: '1'
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npm run build
-
-  payment-staging:
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_DB: actv_payment_staging
-        ports:
-          - 55432:5432
-        options: >-
-          --health-cmd="pg_isready -U postgres -d actv_payment_staging"
-          --health-interval=5s --health-timeout=3s --health-retries=12
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - run: npm run verify
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          node-version: '22'
-          cache: npm
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.9.6
-      - run: npm ci
-      - run: npm run test:payments:staging
-      - run: deno test --allow-env --config supabase/functions/deno.json supabase/functions/_shared/payments_test.ts
-      - run: deno run --allow-env --allow-net=127.0.0.1:55432 --config supabase/functions/deno.json --no-check tests/staging-edge.ts
-
-  deploy:
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy_production && github.ref == 'refs/heads/main'
-    needs: [build, payment-staging]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    concurrency:
-      group: pdv-production
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install Hostinger CLI
-        shell: bash
-        run: |
-          version=5.0.0
-          base="https://github.com/hostinger/api-cli/releases/download/v${version}"
-          archive="hostinger-${version}-linux-amd64.tar.gz"
-          checksums="hostinger-${version}-checksums.sha256"
-          cd "$RUNNER_TEMP"
-          curl --fail --silent --show-error --location --retry 3 --remote-name "$base/$archive"
-          curl --fail --silent --show-error --location --retry 3 --remote-name "$base/$checksums"
-          awk -v archive="$archive" '$2 == archive || $2 == "*" archive' "$checksums" | sha256sum --check --strict
-          mkdir -p "$RUNNER_TEMP/hostinger-bin"
-          tar -xzf "$archive" -C "$RUNNER_TEMP/hostinger-bin" hostinger
-          echo "$RUNNER_TEMP/hostinger-bin" >> "$GITHUB_PATH"
-      - name: Deploy to pdv.actv.mx
-        shell: bash
-        env:
-          HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
-        run: |
-          if [[ -z "$HOSTINGER_API_TOKEN" ]]; then
-            echo "::error::Set the HOSTINGER_API_TOKEN repository secret before deploying."
-            exit 1
-          fi
-          hostinger up . --domain pdv.actv.mx --type nodejs --source upload \
-            --app-type next --node-version 20 --package-manager npm --build-script build \
-            --yes --no-input
-      - name: Check the live site
-        shell: bash
-        run: |
-          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
-            --max-time 20 https://pdv.actv.mx/ -o "$RUNNER_TEMP/pdv.html"
-          grep -Fq 'ACTV | Punto de venta' "$RUNNER_TEMP/pdv.html"
+          name: actv-source-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .verification/
+          include-hidden-files: true
+          retention-days: 14

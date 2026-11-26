@@ -83,11 +83,49 @@ try {
   await db.query("insert into actv_payments.accounts values('00000000-0000-4000-8000-000000000ac7',false,$1,true)", [stripeAccount]);
   const race = await event(1500);
   const smallerRace = await event(6);
+  await db.query('update actv_payments.events set sandbox_fee_per_folio=1500 where event_id=$1', [smallerRace]);
   const raceCatalog = await rpc('actv_catalog', [race, null]);
   assert.equal(raceCatalog.packages[0].amount, 50000);
 
+  // Use local fixture accounts to exercise both modes without a live Stripe call.
+  const liveRace = await event(12);
+  await db.query("insert into actv_payments.accounts values('00000000-0000-4000-8000-000000000ac7',true,'acct_livefixture',true)");
+  await db.query('update actv_payments.events set live_mode=true where event_id=$1', [liveRace]);
+  await db.query('update eventos set precio_1=350, precio_2=15 where id=$1', [liveRace]);
+  const beforeCommissionRequest = randomUUID();
+  const beforeCommission = await online(liveRace, beforeCommissionRequest);
+  assert.equal(beforeCommission.application_fee_amount, 0);
+  await assert.rejects(db.query('update actv_payments.events set live_commission_enabled=true where event_id=$1',
+    [smallerRace]), /actv_live_commission_requires_live_event/);
+
+  await db.query('update actv_payments.events set live_commission_enabled=true where event_id=$1', [liveRace]);
+  assert.equal((await online(liveRace, beforeCommissionRequest)).application_fee_amount, 0);
+  const liveSingleRequest = randomUUID();
+  const liveSingle = await online(liveRace, liveSingleRequest);
+  assert.equal(liveSingle.amount, 35000);
+  assert.equal(liveSingle.application_fee_amount, 1500);
+  const liveDouble = await rpc('actv_create_order', [liveRace, randomUUID(), 'online',
+    JSON.stringify([buyer, { ...buyer, nombre: 'Segundo' }]), null, false, 'buyer@example.invalid', true]);
+  assert.equal(liveDouble.amount, 70000);
+  assert.equal(liveDouble.application_fee_amount, 3000);
+  const liveCatalog = await rpc('actv_catalog', [liveRace, null]);
+  assert.deepEqual(liveCatalog.packages.map(option => option.id), [1]);
+  await assert.rejects(rpc('actv_create_order', [liveRace, randomUUID(), 'online',
+    JSON.stringify([buyer, { ...buyer, package: 2 }]), null, false, 'buyer@example.invalid', true]), /mayor que la comisión/);
+  assert.equal((await staffOrder(liveRace, 'terminal', await athlete())).application_fee_amount, 1500);
+  const liveCash = await rpc('actv_create_staff_order', [liveRace, randomUUID(), 'cash',
+    JSON.stringify([{ athlete_id: await athlete(), package: 2 }]), false], cashier);
+  assert.equal(liveCash.amount, 1500);
+  assert.equal(liveCash.application_fee_amount, 0);
+  await assert.rejects(db.query('update actv_payments.orders set application_fee_amount=-1 where id=$1', [liveSingle.order_id]),
+    /actv_order_application_fee_valid/);
+  await db.query('update actv_payments.events set live_commission_enabled=false where event_id=$1', [liveRace]);
+  assert.equal((await online(liveRace, liveSingleRequest)).application_fee_amount, 1500);
+  assert.equal((await online(liveRace)).application_fee_amount, 0);
+
   const staffAthlete = await athlete();
   const stock = await staffOrder(smallerRace, 'cash', staffAthlete);
+  assert.equal(stock.application_fee_amount, 0);
   const fakeStaff = randomUUID();
   await db.query("insert into perfiles values($1,'outsider@example.invalid','Administrador','{}')", [fakeStaff]);
   assert.equal(await rpc('actv_is_payment_manager', [], fakeStaff), false);
@@ -105,6 +143,7 @@ try {
   assert.equal(Number((await rpc('actv_match_cash_deposit', [shift.id,'cash-deposit-fixture',49900], cashier)).deposit_variance), 0);
 
   const terminal = await staffOrder(smallerRace, 'terminal', await athlete());
+  assert.equal(terminal.application_fee_amount, 1500);
   await assert.rejects(staffOrder(smallerRace, 'terminal', await athlete()), /actv_one_pending_reader/);
   await assert.rejects(capture(terminal.order_id, 'terminal', { session: null }), /no coincide/);
   await rpc('actv_attach_provider', [terminal.order_id,stripeAccount,false,null,id('pi','terminal')]);
@@ -114,7 +153,15 @@ try {
 
   const requestId = randomUUID();
   const pending = await online(smallerRace, requestId);
-  assert.equal((await online(smallerRace, requestId)).order_id, pending.order_id);
+  assert.equal(pending.application_fee_amount, 1500);
+  await db.query('update actv_payments.events set sandbox_fee_per_folio=2000 where event_id=$1', [smallerRace]);
+  const retried = await online(smallerRace, requestId);
+  assert.equal(retried.order_id, pending.order_id);
+  assert.equal(retried.application_fee_amount, 1500);
+  const multiple = await rpc('actv_create_order', [smallerRace, randomUUID(), 'online',
+    JSON.stringify([buyer, { ...buyer, nombre: 'Segundo' }]), null, false, 'buyer@example.invalid']);
+  assert.equal(multiple.amount, 100000);
+  assert.equal(multiple.application_fee_amount, 4000);
   assert.deepEqual(pending.registrations, []);
   await assert.rejects(rpc('actv_order_status', [pending.order_id, randomUUID(), null]));
   assert.deepEqual((await rpc('actv_order_status', [pending.order_id, pending.status_token, null])).registrations, []);
@@ -128,6 +175,12 @@ try {
   await rpc('actv_record_adjustment', [stripeAccount,false,'re_prior','refund',id('pi','pending'),50000,'mxn','succeeded']);
   assert.equal((await capture(pending.order_id, 'pending')).state, 'voided');
   assert.deepEqual((await rpc('actv_order_status', [pending.order_id, pending.status_token, null])).registrations, []);
+  await rpc('actv_record_adjustment', [stripeAccount,false,'re_prior','refund',id('pi','pending'),50000,'mxn','failed']);
+  const restored = await rpc('actv_order_status', [pending.order_id, pending.status_token, null]);
+  assert.equal(restored.state, 'issued');
+  assert.equal(restored.registrations.length, 1);
+  await rpc('actv_record_adjustment', [stripeAccount,false,'re_prior','refund',id('pi','pending'),50000,'mxn','succeeded']);
+  assert.deepEqual(await rpc('actv_order_status', [pending.order_id, pending.status_token, null]), restored);
   await rpc('actv_record_settlement', [stripeAccount,false,'po_fixture',47900,'mxn','paid',
     JSON.stringify([{ id:'txn_fixture',source:id('ch','terminal'),amount:50000,fee:2100,net:47900,currency:'mxn' }])]);
   await rpc('actv_match_bank', [stripeAccount,false,'po_fixture','bank-mismatch-fixture',47890], cashier);
@@ -191,6 +244,130 @@ try {
   await online(lastPlace);
   assert.equal((await capture(lastOrder.order_id,'last')).state,'review');
   const dbP95 = percentile(phases,0.95);
+  const multigatewayRace = await event(10);
+  const mpCollector = '555000000';
+  const mpPreference = mpCollector + '-actv-staging-one';
+  const mpPaymentId = '555000001';
+  const mpReversedId = '555000002';
+  const mpRequest = randomUUID();
+  const mpStart = (requestId) => rpc('actv_create_mercadopago_order', [
+    multigatewayRace, requestId, JSON.stringify([buyer]), 'buyer@example.invalid', false,
+  ]);
+  await assert.rejects(mpStart(mpRequest), /Canal no disponible/);
+  await db.query(`insert into actv_payments.mercadopago_accounts(organizer_id,live_mode,collector_id,ready)
+    values ('00000000-0000-4000-8000-000000000ac7',false,$1,true)`, [mpCollector]);
+  await db.query(`update actv_payments.events set mercadopago_enabled=true,sandbox_fee_per_folio=1500
+    where event_id=$1`, [multigatewayRace]);
+  assert.deepEqual((await rpc('actv_catalog', [multigatewayRace, null])).payment_providers, ['stripe','mercadopago']);
+  const mp = await mpStart(mpRequest);
+  assert.equal(mp.provider,'mercadopago');
+  assert.equal(mp.mercadopago_collector_id,mpCollector);
+  assert.equal(mp.amount,50000);
+  assert.equal(mp.application_fee_amount,1500);
+  assert.equal((await mpStart(mpRequest)).order_id,mp.order_id);
+  await assert.rejects(online(multigatewayRace,mpRequest),{code:'23514'});
+  await assert.rejects(rpc('actv_attach_provider',[mp.order_id,null,false,id('cs','wrong'),null]),/Stripe incompatible/);
+  await assert.rejects(rpc('actv_confirm_mercadopago', [
+    mp.order_id,false,mpCollector,mpPreference,mpPaymentId,50000,'MXN',
+  ]),{code:'23514'});
+  const mpClaims = await Promise.all(Array.from({length:8},()=>rpc('actv_claim_mercadopago_preference', [
+    mp.order_id,false,mpCollector,
+  ])));
+  assert.equal(mpClaims.filter(Boolean).length,1);
+  const mpClaim = mpClaims.find(Boolean);
+  await assert.rejects(rpc('actv_attach_mercadopago_preference', [
+    mp.order_id,false,mpCollector,mpPreference,randomUUID(),
+  ]),{code:'23514'});
+  const mpBound = await rpc('actv_attach_mercadopago_preference',[
+    mp.order_id,false,mpCollector,mpPreference,mpClaim,
+  ]);
+  assert.equal(mpBound.provider_preference_id,mpPreference);
+  const mpConfirm = (amount=50000,mode=false) => rpc('actv_confirm_mercadopago', [
+    mp.order_id,mode,mpCollector,mpPreference,mpPaymentId,amount,'MXN',
+  ]);
+  await assert.rejects(mpConfirm(49500),{code:'23514'});
+  await assert.rejects(mpConfirm(50000,true),{code:'23514'});
+  const confirmations = await Promise.all(Array.from({length:8},()=>mpConfirm()));
+  assert.ok(confirmations.every(confirm => confirm.registrations.length===1 && confirm.registrations[0].folio_asignado==='001'));
+  const stripeRequest = randomUUID();
+  const stripeAlternative = await online(multigatewayRace,stripeRequest);
+  await assert.rejects(mpStart(stripeRequest),{code:'23514'});
+  await rpc('actv_attach_provider',[stripeAlternative.order_id,stripeAccount,false,id('cs','mpalt'),null]);
+  assert.equal((await capture(stripeAlternative.order_id,'mpalt')).registrations[0].folio_asignado,'002');
+  const reversal = (state,amount) => rpc('actv_record_mercadopago_reversal',[
+    mp.order_id,false,mpCollector,mpPreference,mpPaymentId,state,amount,
+  ]);
+  assert.equal((await reversal('approved',10000)).state,'review');
+  assert.deepEqual((await mpConfirm()).registrations,[]);
+  assert.equal((await reversal('refunded',50000)).state,'voided');
+  assert.equal((await reversal('approved',10000)).state,'voided');
+  assert.deepEqual((await mpConfirm()).registrations,[]);
+  const reversedBeforeApproval = await mpStart(randomUUID());
+  const reversedPreference = mpCollector+'-actv-staging-reversed';
+  const secondClaim = await rpc('actv_claim_mercadopago_preference',[reversedBeforeApproval.order_id,false,mpCollector]);
+  await rpc('actv_attach_mercadopago_preference',[
+    reversedBeforeApproval.order_id,false,mpCollector,reversedPreference,secondClaim,
+  ]);
+  assert.equal((await rpc('actv_record_mercadopago_reversal',[
+    reversedBeforeApproval.order_id,false,mpCollector,reversedPreference,mpReversedId,'charged_back',0,
+  ])).state,'review');
+  assert.deepEqual((await rpc('actv_confirm_mercadopago',[
+    reversedBeforeApproval.order_id,false,mpCollector,reversedPreference,mpReversedId,50000,'mxn',
+  ])).registrations,[]);
+  const dateInMatamoros = (await db.query("select (now() at time zone 'America/Matamoros')::date::text as day")).rows[0].day;
+  const mpReport = await rpc('actv_list_admin_payments',[
+    cashier,false,dateInMatamoros,dateInMatamoros,null,null,mpPaymentId,0,
+  ]);
+  assert.equal(mpReport.rows.length,1);
+  assert.equal(mpReport.rows[0].provider,'mercadopago');
+  assert.equal(mpReport.rows[0].refunded,50000);
+  const mpDetail = await rpc('actv_admin_payment',[cashier,false,mp.order_id]);
+  assert.equal(mpDetail.provider,'mercadopago');
+  assert.equal(mpDetail.account_id,null);
+  assert.deepEqual(mpDetail.adjustments.map(({amount})=>amount).sort((a,b)=>a-b),[10000,40000]);
+  await assert.rejects(rpc('actv_create_mercadopago_order', [
+    multigatewayRace,randomUUID(),JSON.stringify([buyer]),'buyer@example.invalid',false,
+  ],cashier),{code:'42501'});
+
+  const retryId = id('evt','lease-first');
+  const directId = id('evt','lease-second');
+  for (const [account, mode, eventId] of [
+    [stripeAccount, false, retryId],
+    [stripeAccount, false, directId],
+    ['acct_livefixture', true, retryId],
+  ]) {
+    await rpc('actv_record_stripe_event', [account,mode,eventId,'account.updated',account,null]);
+  }
+  await db.query("update actv_payments.provider_events set retry_after=now()-interval '1 minute' where event_id=$1",[retryId]);
+  const transaction = await db.connect();
+  try {
+    await transaction.query('begin');
+    await transaction.query('set local role service_role');
+    const firstClaim = (await transaction.query('select public.actv_claim_stripe_event_retry(false) as claim')).rows[0].claim;
+    assert.equal(firstClaim.event_id,retryId);
+    const parallelClaim = await rpc('actv_claim_stripe_event_retry',[false]);
+    assert.equal(parallelClaim.event_id,directId);
+    assert.equal(await rpc('actv_claim_stripe_event_retry',[false]),null);
+    assert.equal((await rpc('actv_claim_stripe_event_retry',[true])).account_id,'acct_livefixture');
+    await transaction.query('commit');
+
+    await rpc('actv_finish_stripe_event',[stripeAccount,false,directId]);
+    assert.equal(await rpc('actv_finish_stripe_event_retry',[stripeAccount,false,directId,parallelClaim.lease,'late_failure']),false);
+    assert.equal(await rpc('actv_finish_stripe_event_retry',[stripeAccount,false,retryId,firstClaim.lease,'temporary_failure']),true);
+    assert.equal(await rpc('actv_claim_stripe_event_retry',[false]),null);
+    await db.query("update actv_payments.provider_events set retry_after=now()-interval '1 second' where event_id=$1 and not live_mode",[retryId]);
+    const secondClaim = await rpc('actv_claim_stripe_event_retry',[false]);
+    assert.equal(secondClaim.event_id,retryId);
+    assert.notEqual(secondClaim.lease,firstClaim.lease);
+    assert.equal(await rpc('actv_finish_stripe_event_retry',[stripeAccount,false,retryId,firstClaim.lease,null]),false);
+    assert.equal(await rpc('actv_finish_stripe_event_retry',[stripeAccount,false,retryId,secondClaim.lease,null]),true);
+    await assert.rejects(rpc('actv_claim_stripe_event_retry',[false],cashier),{code:'42501'});
+  } catch (error) {
+    await transaction.query('rollback');
+    throw error;
+  } finally {
+    transaction.release();
+  }
   console.log(JSON.stringify({ profile:'Local PostgreSQL staging with synthetic provider proof',
     buyers:1500,submissionsInParallel:28,duplicateDeliveries:300,lastPlaceConcurrentAttempts:20,
     ...snapshot,loadSeconds:Number(loadSeconds.toFixed(2)),ordersPerSecond:Number((1500/loadSeconds).toFixed(2)),

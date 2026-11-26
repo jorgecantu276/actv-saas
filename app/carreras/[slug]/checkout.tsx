@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { formattedPrice, goToStripe, orderStatusPath, paymentFunction, PaymentsError, type PackageNumber, type Race, type StartedOrder } from '../../_pagos/api';
-import { PaymentAlert, PaymentPage, paymentButton, paymentInput, secondaryButton } from '../../_pagos/ui';
+import Link from 'next/link';
+import { ArrowLeft, ArrowRight, Plus } from 'lucide-react';
+import { formattedPrice, goToCheckout, orderStatusPath, paymentFunction, PaymentsError, providerLabels, type OnlineProvider, type PackageNumber, type Race, type StartedOrder } from '../../_pagos/api';
+import { PublicSite, raceDate } from '../../_pagos/public-site';
+import { RacePhoto } from '../../_pagos/race-art';
+import styles from '../../_pagos/race-journey.module.css';
 
 type Participant = {
   nombre: string;
@@ -25,21 +29,17 @@ const fields = [
   ['telefono', 'Teléfono', 'tel'], ['telefono_emergencia', 'Teléfono de emergencia', 'tel'],
 ] as const;
 
-function formatEventDate(date: string) {
-  const timestamp = Date.parse(date);
-  if (!Number.isFinite(timestamp)) return date;
-  return new Intl.DateTimeFormat('es-MX', { dateStyle: 'full', timeZone: 'UTC' }).format(timestamp);
-}
-
 export default function Checkout({ slug }: { slug: string }) {
   const [race, setRace] = useState<Race | null>(null);
   const [participants, setParticipants] = useState<ParticipantForm[]>([]);
   const [buyerEmail, setBuyerEmail] = useState('');
+  const [provider, setProvider] = useState<OnlineProvider>('stripe');
+  const [lockedProvider, setLockedProvider] = useState<OnlineProvider | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
-  const attempt = useRef<{ payload: string; key: string } | null>(null);
+  const attempt = useRef<{ payload: string; key: string; provider: OnlineProvider } | null>(null);
   const paymentInProgress = useRef(false);
 
   useEffect(() => {
@@ -48,6 +48,7 @@ export default function Checkout({ slug }: { slug: string }) {
       .then(({ event }) => {
         if (request.signal.aborted) return;
         setRace(event);
+        setProvider(event.paymentProviders?.[0] ?? 'stripe');
         setParticipants(event.options.length ? [newParticipant(event.options[0].id)] : []);
         setError('');
       })
@@ -82,21 +83,30 @@ export default function Checkout({ slug }: { slug: string }) {
       return;
     }
     const payloadKey = JSON.stringify(payload);
-    if (attempt.current?.payload !== payloadKey) attempt.current = { payload: payloadKey, key: crypto.randomUUID() };
+    if (!attempt.current) attempt.current = { payload: payloadKey, key: crypto.randomUUID(), provider };
+    if (attempt.current.payload !== payloadKey || attempt.current.provider !== provider) return;
+    setLockedProvider(provider);
     paymentInProgress.current = true;
     setSubmitting(true);
     setError('');
     try {
       const order = await paymentFunction<StartedOrder>('actv-checkout', {
-        action: 'start', ...payload, idempotencyKey: attempt.current.key,
+        action: 'start', ...payload, provider, idempotencyKey: attempt.current.key,
       });
-      if (order.checkoutUrl) goToStripe(order.checkoutUrl, 'checkout');
+      if (order.provider === 'mercadopago') {
+        try { sessionStorage.setItem(`actv:payment:${order.orderId}`, order.orderToken); } catch { /* Webhook remains independent. */ }
+      }
+      if (order.checkoutUrl) goToCheckout(order.checkoutUrl, order.provider ?? provider);
       else window.location.assign(orderStatusPath(order.orderId, order.orderToken));
     } catch (cause) {
       const status = cause instanceof PaymentsError ? cause.status : 0;
+      if (status === 400) {
+        attempt.current = null;
+        setLockedProvider(null);
+      }
       const message = status === 409 ? 'La disponibilidad cambió. Verifica los paquetes e intenta de nuevo.'
         : status === 400 ? 'Revisa los datos de contacto y de los participantes.'
-          : 'No se pudo iniciar el pago. Intenta de nuevo con los mismos datos.';
+          : 'No se pudo abrir el pago. Vuelve a intentar con el mismo método.';
       setError(message);
       paymentInProgress.current = false;
       setSubmitting(false);
@@ -104,52 +114,59 @@ export default function Checkout({ slug }: { slug: string }) {
   }
 
   const maxParticipants = Math.min(race?.limits?.maxParticipants ?? 20, race?.available ?? Infinity);
+  const providers = race?.paymentProviders ?? ['stripe' as const];
   const total = participants.reduce((amount, row) =>
     amount + (race?.options.find((option) => option.id === row.package)?.amountMinor ?? 0), 0);
 
   return (
-    <PaymentPage label="Inscripción en línea" title={race?.name ?? 'Inscripción a la carrera'}>
-      {loading && <p role="status" className="mt-5 text-slate-600">Cargando la carrera…</p>}
+    <PublicSite active="/carreras">
+      <div className={styles.section}>
+      <Link className={styles.back} href="/carreras"><ArrowLeft size={16} aria-hidden="true" /> Calendario</Link>
+      <header className={styles.heading}>
+        <p className={styles.kicker}>Inscripción</p>
+        <h1>{race?.name ?? 'Inscripción a la carrera'}</h1>
+        {race?.date && <p className={styles.raceMeta}><time dateTime={race.date}>{raceDate(race.date)}</time></p>}
+        {race?.description && <p className={styles.description}>{race.description}</p>}
+      </header>
+      {loading && <p role="status" className={styles.notice}>Cargando la carrera…</p>}
       {!race && error && (
         <>
-          <PaymentAlert>{error}</PaymentAlert>
-          <button type="button" className={`${secondaryButton} mt-4`} onClick={() => { setLoading(true); setReload((n) => n + 1); }}>Volver a cargar</button>
+          <p role="alert" className={styles.error}>{error}</p>
+          <button type="button" className={styles.outline} onClick={() => { setLoading(true); setReload((n) => n + 1); }}>Volver a cargar</button>
         </>
       )}
       {race && (
         <>
-          {race.date && <p className="mt-3 text-slate-700">{formatEventDate(race.date)}</p>}
-          {race.description && <p className="mt-3 max-w-2xl whitespace-pre-line text-slate-700">{race.description}</p>}
-          {race.options.length === 0 || maxParticipants <= 0 ? (
-            <p className="mt-7 rounded-xl bg-white p-5">No hay lugares disponibles para inscripción en línea.</p>
+          {race.options.length === 0 || maxParticipants <= 0 || providers.length === 0 ? (
+            <p className={styles.notice}>No hay lugares disponibles para inscripción en línea.</p>
           ) : (
-            <form onSubmit={startCheckout} className="mt-8 space-y-5">
-              <fieldset disabled={submitting} className="space-y-5">
-                <label className="block rounded-xl border border-slate-200 bg-white p-5 text-sm font-semibold">
+            <form onSubmit={startCheckout} className={styles.layout}>
+              <fieldset disabled={submitting || lockedProvider !== null} className={styles.fields}>
+                <label className={styles.emailField}>
                   Correo de contacto para el pedido
-                  <input autoComplete="email" type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} className={paymentInput} required maxLength={250} />
+                  <input autoComplete="email" type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} className={styles.input} required maxLength={250} />
                 </label>
                 {participants.map((participant, index) => (
-                  <section key={participant.rowId} className="rounded-xl border border-slate-200 bg-white p-5">
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                      <h2 className="font-sans text-lg font-bold">Participante {index + 1}</h2>
+                  <section key={participant.rowId} className={styles.participant}>
+                    <div className={styles.participantHeader}>
+                      <h2>Participante {index + 1}</h2>
                       {participants.length > 1 && (
-                        <button type="button" aria-label={`Quitar participante ${index + 1}`} className="text-sm font-medium text-blue-800 underline" onClick={() => setParticipants((rows) => rows.filter((row) => row.rowId !== participant.rowId))}>Quitar</button>
+                        <button type="button" aria-label={`Quitar participante ${index + 1}`} className={styles.textButton} onClick={() => setParticipants((rows) => rows.filter((row) => row.rowId !== participant.rowId))}>Quitar</button>
                       )}
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className={styles.fieldGrid}>
                       {fields.map(([field, label, type]) => (
-                        <label key={field} className="text-sm font-semibold">{label}
-                          <input minLength={type === 'tel' ? 7 : 1} maxLength={type === 'tel' ? 30 : 100} className={paymentInput} type={type} required value={participant[field]} onChange={(e) => updateParticipant(participant.rowId, { [field]: e.target.value })} />
+                        <label key={field} className={styles.field}>{label}
+                          <input minLength={type === 'tel' ? 7 : 1} maxLength={type === 'tel' ? 30 : 100} className={styles.input} type={type} required value={participant[field]} onChange={(e) => updateParticipant(participant.rowId, { [field]: e.target.value })} />
                         </label>
                       ))}
-                      <label className="text-sm font-semibold">Paquete
-                        <select aria-label="Paquete" className={paymentInput} value={participant.package} onChange={(e) => updateParticipant(participant.rowId, { package: Number(e.target.value) as PackageNumber })}>
+                      <label className={styles.field}>Paquete
+                        <select className={styles.input} value={participant.package} onChange={(e) => updateParticipant(participant.rowId, { package: Number(e.target.value) as PackageNumber })}>
                           {race.options.map(({ id, name, amountMinor, currency }) => <option key={id} value={id}>{name} · {formattedPrice(amountMinor, currency)}</option>)}
                         </select>
                       </label>
-                      <label className="text-sm font-semibold">Talla de playera
-                        <select aria-label="Talla de playera" className={paymentInput} required value={participant.talla_playera} onChange={(e) => updateParticipant(participant.rowId, { talla_playera: e.target.value })}>
+                      <label className={styles.field}>Talla de playera
+                        <select className={styles.input} required value={participant.talla_playera} onChange={(e) => updateParticipant(participant.rowId, { talla_playera: e.target.value })}>
                           <option value="">Selecciona una talla</option>
                           {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((size) => <option key={size}>{size}</option>)}
                         </select>
@@ -157,19 +174,40 @@ export default function Checkout({ slug }: { slug: string }) {
                     </div>
                   </section>
                 ))}
-                {participants.length < maxParticipants && <button type="button" className={secondaryButton} onClick={() => setParticipants((rows) => [...rows, newParticipant(race.options[0].id)])}>Agregar participante</button>}
+                {participants.length < maxParticipants && (
+                  <button type="button" className={`${styles.outline} ${styles.add}`} onClick={() => setParticipants((rows) => [...rows, newParticipant(race.options[0].id)])}>
+                    Agregar participante <Plus size={15} aria-hidden="true" />
+                  </button>
+                )}
               </fieldset>
-              {error && <PaymentAlert>{error}</PaymentAlert>}
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-900 p-5 text-white">
-                <p>{participants.length} {participants.length === 1 ? 'inscripción' : 'inscripciones'}
-                  <span className="ml-3 font-semibold">{formattedPrice(total, race.options[0].currency)}</span>
-                </p>
-                <button type="submit" className={paymentButton} disabled={submitting}>{submitting ? 'Abriendo Stripe…' : 'Continuar a Stripe'}</button>
-              </div>
+              <aside className={styles.summary} aria-labelledby="order-summary">
+                <RacePhoto className={styles.summaryPhoto} sizes="(max-width: 760px) 90vw, 390px" />
+                <div className={styles.summaryBody}>
+                  <div className={styles.summaryTitle}>
+                    <h2 id="order-summary">Tu inscripción</h2>
+                    <span>{participants.length} {participants.length === 1 ? 'participante' : 'participantes'}</span>
+                  </div>
+                  <p className={styles.total} aria-live="polite">
+                    <span>Total</span> <strong>{formattedPrice(total, race.options[0].currency)} {race.options[0].currency.toUpperCase()}</strong>
+                  </p>
+                  {providers.length > 1 && <fieldset disabled={submitting || lockedProvider !== null} className={styles.providers}>
+                    <legend>Pagar con</legend>
+                    {providers.map((value) => <label key={value}>
+                      <input type="radio" name="provider" value={value} checked={provider === value} onChange={() => setProvider(value)} />
+                      {providerLabels[value]}
+                    </label>)}
+                  </fieldset>}
+                  {error && <p role="alert" className={styles.error}>{error}</p>}
+                  <button type="submit" className={styles.action} disabled={submitting}>
+                    {submitting ? 'Abriendo pago…' : `Continuar a ${providerLabels[provider]}`} <ArrowRight size={19} aria-hidden="true" />
+                  </button>
+                </div>
+              </aside>
             </form>
           )}
         </>
       )}
-    </PaymentPage>
+      </div>
+    </PublicSite>
   );
 }

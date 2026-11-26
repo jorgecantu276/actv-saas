@@ -1,9 +1,22 @@
-import { appOrigin, body, buyerEmail, field, handler, HttpError, rpc, uuid } from '../_shared/http.ts';
-import { createOrder, getOrder, orderResult, parseItems, providerContext } from '../_shared/orders.ts';
+import { body, buyerEmail, db, field, handler, HttpError, liveMode, rpc, uuid } from '../_shared/http.ts';
+import {
+  mercadoPagoEnabled,
+  startMercadoPagoCheckout,
+  syncMercadoPagoCheckout,
+} from '../_shared/mercado-pago-checkout.ts';
+import {
+  createOrder,
+  getOrder,
+  type Order,
+  orderResult,
+  parseItems,
+  providerContext,
+} from '../_shared/orders.ts';
 import {
   attachProvider,
+  createCheckoutSession,
   objectId,
-  orderMetadata,
+  type Stripe,
   stripeClient,
   stripeOptions,
   stripeRedirect,
@@ -18,7 +31,39 @@ interface Catalog {
   description: string | null;
   available: number | null;
   currency: string;
+  payment_providers?: ('stripe' | 'mercadopago')[];
   packages: Array<{ package: number; name: string; amount: number; currency?: string }>;
+}
+
+async function createBoundCheckout(stripe: Stripe, order: Order, account: string) {
+  const session = await createCheckoutSession(stripe, order, account);
+  // Stripe may return the initial idempotent response for a session that has since completed.
+  // Persist its identity, then read its current status before returning any Checkout URL.
+  await attachProvider(order, account, session.id, objectId(session.payment_intent));
+  return session.id;
+}
+
+async function refreshCheckout(stripe: Stripe, order: Order, account: string, sessionId: string) {
+  const session = await stripe.checkout.sessions.retrieve(sessionId, {}, stripeOptions(account));
+  if (session.id !== sessionId) throw new HttpError(409, 'provider_checkout_mismatch');
+  if (session.status === 'open' && session.url && session.livemode === order.live_mode) {
+    return { order, checkoutUrl: stripeRedirect(session.url, 'checkout.stripe.com') };
+  }
+  const updated = await syncCheckout(stripe, account, sessionId, order.order_id);
+  return { order: updated ?? order };
+}
+
+async function onlineStatus(order: Order, checkoutUrl?: string) {
+  const { registrations: _registrations, ...result } = orderResult(order);
+  if (!result.folios.length || !order.event_id) return { ...result, checkoutUrl };
+
+  // The order has already been authorized by its private status token.
+  const { data } = await db().from('eventos').select('nombre_carrera,fecha,distancia')
+    .eq('id', order.event_id).abortSignal(AbortSignal.timeout(2000)).maybeSingle();
+  return {
+    ...result,
+    race: data?.nombre_carrera ? { name: data.nombre_carrera, date: data.fecha, distance: data.distancia } : undefined,
+  };
 }
 
 export const checkoutHandler = handler('actv-checkout', async (request) => {
@@ -36,6 +81,9 @@ export const checkoutHandler = handler('actv-checkout', async (request) => {
         date,
         description,
         available,
+        paymentProviders: (catalog.payment_providers ?? ['stripe']).filter((provider) =>
+          provider === 'stripe' || mercadoPagoEnabled()
+        ),
         options: packages.map((item) => ({
           id: item.package,
           name: item.name,
@@ -46,28 +94,54 @@ export const checkoutHandler = handler('actv-checkout', async (request) => {
     };
   }
   if (input.action === 'status' || input.action === 'resume') {
-    const order = await getOrder(uuid(input.orderId), uuid(input.orderToken), null);
+    let order = await getOrder(uuid(input.orderId), uuid(input.orderToken), null);
     if (order.channel !== 'online') throw new HttpError(404, 'record_not_found');
-    const { registrations: _registrations, ...result } = orderResult(order);
-    if (input.action === 'resume' && order.state === 'pending' && order.provider_session_id) {
+    if (order.provider === 'mercadopago') {
+      if (
+        order.state === 'pending' && typeof input.paymentId === 'string' &&
+        /^[1-9]\d{0,18}$/.test(input.paymentId)
+      ) {
+        order = await syncMercadoPagoCheckout(order, input.paymentId);
+      }
+      if (input.action === 'resume' && order.state === 'pending') {
+        return onlineStatus(order, (await startMercadoPagoCheckout(order))?.checkoutUrl);
+      }
+      return onlineStatus(order);
+    }
+    if (input.action === 'resume' && order.state === 'pending') {
       const account = providerContext(order, 'online');
       const stripe = stripeClient();
-      const session = await stripe.checkout.sessions.retrieve(
-        order.provider_session_id,
-        {},
-        stripeOptions(account),
-      );
-      if (session.status === 'open' && session.livemode === order.live_mode && session.url) {
-        return { ...result, checkoutUrl: stripeRedirect(session.url, 'checkout.stripe.com') };
-      }
+      const sessionId = order.provider_session_id ?? await createBoundCheckout(stripe, order, account);
+      const current = await refreshCheckout(stripe, order, account, sessionId);
+      return onlineStatus(current.order, current.checkoutUrl);
     }
-    return result;
+    return onlineStatus(order);
   }
   if (input.action !== 'start') throw new HttpError(400, 'invalid_action');
 
-  const stripe = stripeClient();
-  const origin = appOrigin();
   const email = buyerEmail(input.buyerEmail);
+  if (input.provider !== undefined && input.provider !== 'stripe' && input.provider !== 'mercadopago') {
+    throw new HttpError(400, 'invalid_provider');
+  }
+  if (input.provider === 'mercadopago') {
+    if (!mercadoPagoEnabled()) throw new HttpError(503, 'mercadopago_not_available');
+    const order = await rpc<Order>('actv_create_mercadopago_order', {
+      p_event_id: uuid(input.eventId),
+      p_request_id: uuid(input.idempotencyKey),
+      p_items: parseItems(input.participants, false),
+      p_buyer_email: email.toLowerCase(),
+      p_live_mode: liveMode(),
+    });
+    const { registrations: _registrations, ...result } = orderResult(order);
+    return {
+      ...result,
+      orderToken: order.status_token,
+      checkoutUrl: order.state === 'pending'
+        ? (await startMercadoPagoCheckout(order))?.checkoutUrl
+        : undefined,
+    };
+  }
+  const stripe = stripeClient();
   const order = await createOrder({
     eventId: uuid(input.eventId),
     requestId: uuid(input.idempotencyKey),
@@ -75,65 +149,17 @@ export const checkoutHandler = handler('actv-checkout', async (request) => {
     items: parseItems(input.participants, false),
     operator: null,
     relay: false,
-    email,
+    email: email.toLowerCase(),
   });
   const account = providerContext(order, 'online');
   const { registrations: _registrations, ...result } = orderResult(order);
   const response = { ...result, orderToken: order.status_token };
   if (order.state !== 'pending') return response;
 
-  if (order.provider_session_id) {
-    const session = await stripe.checkout.sessions.retrieve(
-      order.provider_session_id,
-      {},
-      stripeOptions(account),
-    );
-    if (session.status === 'open' && session.url && session.livemode === order.live_mode) {
-      return { ...response, checkoutUrl: stripeRedirect(session.url, 'checkout.stripe.com') };
-    }
-    const updated = await syncCheckout(stripe, account, session.id, order.order_id);
-    if (!updated) return response;
-    const { registrations: _updated, ...updatedResult } = orderResult(updated);
-    return { ...updatedResult, orderToken: order.status_token };
-  }
-
-  const expiresAt = Math.floor(Date.parse(order.expires_at) / 1000);
-  if (!Number.isSafeInteger(expiresAt) || expiresAt < Math.floor(Date.now() / 1000) + 1_805) {
-    throw new HttpError(409, 'reservation_checkout_window_closed');
-  }
-  const success = new URL('/registro/estado', origin);
-  success.searchParams.set('orden', order.order_id);
-  success.hash = new URLSearchParams({ token: order.status_token }).toString();
-  const cancel = new URL(success);
-  cancel.searchParams.set('cancelado', '1');
-  const metadata = orderMetadata(order);
-  const session = await stripe.checkout.sessions.create({
-    mode: 'payment',
-    allowed_payment_method_types: ['card'],
-    client_reference_id: order.order_id,
-    customer_email: email,
-    success_url: success.href,
-    cancel_url: cancel.href,
-    expires_at: expiresAt,
-    metadata,
-    payment_intent_data: { metadata },
-    line_items: order.items.map((item) => ({
-      quantity: 1,
-      price_data: {
-        currency: order.currency.toLowerCase(),
-        unit_amount: item.amount,
-        product_data: { name: item.name },
-      },
-    })),
-  }, stripeOptions(account, `actv-checkout-${order.order_id}`));
-  if (
-    !session.url || session.livemode !== order.live_mode || session.amount_total !== order.amount ||
-    session.currency !== order.currency.toLowerCase()
-  ) {
-    throw new HttpError(409, 'provider_checkout_mismatch');
-  }
-  await attachProvider(order, account, session.id, objectId(session.payment_intent));
-  return { ...response, checkoutUrl: stripeRedirect(session.url, 'checkout.stripe.com') };
+  const sessionId = order.provider_session_id ?? await createBoundCheckout(stripe, order, account);
+  const current = await refreshCheckout(stripe, order, account, sessionId);
+  const { registrations: _current, ...currentResult } = orderResult(current.order);
+  return { ...currentResult, orderToken: order.status_token, checkoutUrl: current.checkoutUrl };
 }, true);
 
 export default { fetch: checkoutHandler };

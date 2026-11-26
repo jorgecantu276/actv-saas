@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { goToStripe, paymentFunction, PaymentsError, type OrderStatus } from '../../_pagos/api';
-import { PaymentAlert, PaymentPage, paymentButton, secondaryButton } from '../../_pagos/ui';
+import Link from 'next/link';
+import { ArrowLeft, ArrowUpRight, Check } from 'lucide-react';
+import { goToCheckout, paymentFunction, PaymentsError, type OrderStatus } from '../../_pagos/api';
+import { PublicSite, raceDate } from '../../_pagos/public-site';
+import { RacePhoto } from '../../_pagos/race-art';
+import styles from '../../_pagos/race-journey.module.css';
 
 const labels: Record<OrderStatus['status'], string> = {
   pending: 'Confirmación pendiente', issued: 'Inscripción confirmada', closed: 'Pedido cerrado',
@@ -15,7 +19,16 @@ const orderMessages: Partial<Record<OrderStatus['status'], string>> = {
   voided: 'El folio de este pedido quedó anulado.',
 };
 
-const statusToken = () => new URLSearchParams(window.location.hash.slice(1)).get('token');
+function statusToken(orderId: string) {
+  const token = new URLSearchParams(window.location.hash.slice(1)).get('token');
+  if (token) return token;
+  try { return sessionStorage.getItem(`actv:payment:${orderId}`); } catch { return null; }
+}
+
+function paymentId() {
+  const value = new URLSearchParams(window.location.search).get('payment_id');
+  return value && /^[1-9]\d{0,18}$/.test(value) ? value : undefined;
+}
 
 export default function Status({ orderId, canceled }: { orderId: string; canceled: boolean }) {
   const [order, setOrder] = useState<OrderStatus | null>(null);
@@ -26,7 +39,7 @@ export default function Status({ orderId, canceled }: { orderId: string; cancele
 
   useEffect(() => {
     const request = new AbortController();
-    const token = statusToken();
+    const token = statusToken(orderId);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempts = 0;
 
@@ -37,7 +50,7 @@ export default function Status({ orderId, canceled }: { orderId: string; cancele
         return;
       }
       try {
-        const current = await paymentFunction<OrderStatus>('actv-checkout', { action: 'status', orderId, orderToken: token }, request.signal);
+        const current = await paymentFunction<OrderStatus>('actv-checkout', { action: 'status', orderId, orderToken: token, paymentId: paymentId() }, request.signal);
         if (request.signal.aborted) return;
         setError('');
         setOrder(current);
@@ -61,20 +74,20 @@ export default function Status({ orderId, canceled }: { orderId: string; cancele
   }, [orderId, pollRound]);
 
   async function resumeCheckout() {
-    const token = statusToken();
+    const token = statusToken(orderId);
     if (!token || resuming) return;
     setResuming(true);
     setError('');
     try {
       const result = await paymentFunction<OrderStatus & { checkoutUrl?: string }>('actv-checkout', {
-        action: 'resume', orderId, orderToken: token,
+        action: 'resume', orderId, orderToken: token, paymentId: paymentId(),
       });
       if (result.checkoutUrl) {
-        goToStripe(result.checkoutUrl, 'checkout');
+        goToCheckout(result.checkoutUrl, result.provider ?? 'stripe');
         return;
       }
       setOrder((current) => current && current.status !== 'pending' && result.status === 'pending' ? current : result);
-      if (result.status === 'pending') setError('Stripe aún está procesando el pedido. Vuelve a consultar el estado.');
+      if (result.status === 'pending') setError('El pago sigue pendiente. Vuelve a consultar el estado.');
     } catch {
       setError('No pudimos abrir el pago. Vuelve a consultar el estado del pedido.');
     }
@@ -85,33 +98,62 @@ export default function Status({ orderId, canceled }: { orderId: string; cancele
   const title = order && (order.status !== 'issued' || confirmed) ? labels[order.status] : 'Estado de la inscripción';
 
   return (
-    <PaymentPage label="Inscripción en línea" title={title}>
-      {error && <PaymentAlert>{error}</PaymentAlert>}
-      <div aria-live="polite" className="mt-5 rounded-xl border border-slate-200 bg-white p-5 sm:p-7">
-        {!order && !error && <p role="status">Consultando el estado del pedido…</p>}
-        {confirmed && order && (
-          <>
-            <h2 className="font-sans text-lg font-semibold">{order.folios.length === 1 ? 'Tu folio' : 'Tus folios'}</h2>
-            <ul className="mt-3 grid gap-3 sm:grid-cols-2">
-              {order.folios.map((folio) => <li key={folio} className="rounded-lg bg-emerald-50 px-4 py-3 font-mono text-lg font-bold text-emerald-900">{folio}</li>)}
-            </ul>
-          </>
-        )}
-        {order && !confirmed && (
-          <p className="text-slate-700">
-            {order.status === 'pending'
-              ? canceled ? 'Regresaste de Stripe antes de que se confirmara el pago. Guarda el enlace para revisar el pedido.'
-                : 'Estamos esperando la confirmación del pago. Guarda este enlace para consultar tus folios.'
-              : orderMessages[order.status] ?? 'Guarda este enlace para consultar tu pedido.'}
-          </p>
-        )}
-        {orderId && !confirmed && (
-          <div className="mt-4 flex flex-wrap gap-3">
-            {canceled && order?.status === 'pending' && <button type="button" className={paymentButton} disabled={resuming} onClick={resumeCheckout}>{resuming ? 'Abriendo Stripe…' : 'Volver al pago'}</button>}
-            <button type="button" className={secondaryButton} disabled={checking || resuming} onClick={() => { setChecking(true); setError(''); setPollRound((round) => round + 1); }}>{checking ? 'Consultando…' : 'Actualizar estado'}</button>
+    <PublicSite>
+      <div className={styles.section}>
+        <Link className={styles.back} href="/carreras"><ArrowLeft size={16} aria-hidden="true" /> Calendario</Link>
+        <header className={`${styles.heading} ${styles.statusHeading}`} aria-live="polite">
+          <p className={styles.kicker}>Inscripción</p>
+          <h1>{title}</h1>
+        </header>
+        {error && <p role="alert" className={styles.error}>{error}</p>}
+        {confirmed && order ? (
+          <div className={styles.ticketLayout}>
+            <section className={styles.ticket} aria-label="Folios de la inscripción">
+              <div className={styles.ticketHead}>
+                <span>{order.folios.length === 1 ? 'Tu folio' : 'Tus folios'}</span>
+                <Check size={18} aria-hidden="true" />
+              </div>
+              <div className={styles.ticketBody}>
+                {order.race && (
+                  <>
+                    <h2>{order.race.name}</h2>
+                    {(order.race.date || order.race.distance) && <p className={styles.raceMeta}>
+                      {order.race.date && <time dateTime={order.race.date}>{raceDate(order.race.date)}</time>}
+                      {order.race.distance && order.race.distance !== 'Por confirmar' && <span>{order.race.distance}</span>}
+                    </p>}
+                  </>
+                )}
+                <ul className={`${styles.folios} ${order.folios.length === 1 ? styles.singleFolio : ''}`} role="list">
+                  {order.folios.map((folio) => <li key={folio}>{folio}</li>)}
+                </ul>
+              </div>
+              <div className={styles.ticketFoot}>
+                <p>Entra con el correo que usaste para inscribirte y encuentra tu folio en Mi ACTV.</p>
+                <Link href="/mi-actv" className={styles.outline}>Ir a Mi ACTV <ArrowUpRight size={16} aria-hidden="true" /></Link>
+              </div>
+            </section>
+            <RacePhoto className={styles.ticketPhoto} sizes="(max-width: 760px) 90vw, 480px" />
+          </div>
+        ) : (
+          <div className={styles.statePanel} aria-live="polite">
+            {!order && !error && <p role="status">Consultando el estado del pedido…</p>}
+            {order && (
+              <p>
+                {order.status === 'pending'
+                  ? canceled ? 'El pago sigue pendiente. Puedes volver al pago o consultar el estado.'
+                    : 'Estamos esperando la confirmación del pago. Guarda este enlace para consultar tus folios.'
+                  : orderMessages[order.status] ?? 'Guarda este enlace para consultar tu pedido.'}
+              </p>
+            )}
+            {orderId && (
+              <div className={styles.stateActions}>
+                {canceled && order?.status === 'pending' && <button type="button" className={styles.action} disabled={resuming} onClick={resumeCheckout}>{resuming ? 'Abriendo pago…' : 'Volver al pago'}</button>}
+                <button type="button" className={styles.outline} disabled={checking || resuming} onClick={() => { setChecking(true); setError(''); setPollRound((round) => round + 1); }}>{checking ? 'Consultando…' : 'Actualizar estado'}</button>
+              </div>
+            )}
           </div>
         )}
       </div>
-    </PaymentPage>
+    </PublicSite>
   );
 }

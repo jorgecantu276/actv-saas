@@ -20,6 +20,18 @@ export interface StoredEvent {
   order_id: string | null;
 }
 
+export type EventRetry = StoredEvent & { lease: string };
+
+export function acknowledgeEvent(event: EventRetry, failure: string | null) {
+  return rpc<boolean>('actv_finish_stripe_event_retry', {
+    p_account_id: event.account_id,
+    p_live_mode: event.live_mode,
+    p_event_id: event.event_id,
+    p_lease: event.lease,
+    p_failure_code: failure,
+  });
+}
+
 export const eventTypes = new Set([
   'account.updated',
   'account.application.deauthorized',
@@ -96,7 +108,7 @@ async function settlement(stripe: Stripe, account: string, id: string, includeLi
   if (batch.length) await rpc('actv_record_settlement', { ...args, p_lines: batch });
 }
 
-export async function completeEvent(stripe: Stripe, record: StoredEvent) {
+export async function applyEvent(stripe: Stripe, record: StoredEvent) {
   const { account_id: account, event_type: type, object_id: id, order_id } = record;
   if (record.live_mode !== liveMode() || !account.startsWith('acct_')) {
     throw new HttpError(409, 'payment_mode_mismatch');
@@ -119,9 +131,12 @@ export async function completeEvent(stripe: Stripe, record: StoredEvent) {
   } else if (type.startsWith('payout.')) {
     await settlement(stripe, account, id, type === 'payout.reconciliation_completed');
   }
+}
 
+export async function completeEvent(stripe: Stripe, record: StoredEvent) {
+  await applyEvent(stripe, record);
   await rpc('actv_finish_stripe_event', {
-    p_account_id: account,
+    p_account_id: record.account_id,
     p_live_mode: record.live_mode,
     p_event_id: record.event_id,
   });
