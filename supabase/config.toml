@@ -1,0 +1,22 @@
+project_id = 'actv-payments'
+
+[functions.actv-checkout]
+verify_jwt = false
+
+[functions.actv-organizer-connect]
+verify_jwt = false
+
+[functions.actv-stripe-terminal]
+verify_jwt = false
+
+[functions.actv-stripe-webhook]
+verify_jwt = false
+
+[functions.actv-stripe-reconcile]
+verify_jwt = false
+
+[functions.actv-admin-payments]
+verify_jwt = false
+
+[functions.actv-mercadopago-webhook]
+verify_jwt = false

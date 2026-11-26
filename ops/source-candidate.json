@@ -1,0 +1,75 @@
+{
+  "version": "0.2.0-rc.1",
+  "product": "ACTV",
+  "kind": "source_candidate",
+  "sourceRef": "codex/actv-supported-candidate",
+  "productionQualified": false,
+  "supported": [
+    "legacy staff workflows",
+    "public races and guest Stripe checkout",
+    "private Mi ACTV attendance",
+    "organizer event operations",
+    "cash and configured Stripe Terminal contracts",
+    "refund recovery and reconciliation"
+  ],
+  "excluded": [
+    "new merchandise storefront",
+    "external timing/results imports",
+    "external historical migration",
+    "Mercado Pago checkout activation"
+  ],
+  "migrations": [
+    "20261114010000_actv_paid_folios.sql",
+    "20261114010100_actv_payment_operations.sql",
+    "20261114010200_actv_cash_reconciliation.sql",
+    "20261114010300_actv_payment_access.sql",
+    "20261114010400_actv_sandbox_application_fee.sql",
+    "20261114010500_actv_live_commission.sql",
+    "20261114010600_actv_admin_payments.sql",
+    "20261114010700_actv_refund_status.sql",
+    "20261114010900_actv_refund_recovery.sql",
+    "20261114011000_actv_payment_health.sql",
+    "20261114011100_actv_stripe_event_retry_leases.sql",
+    "20261114011200_actv_health_automation.sql",
+    "20261114011300_actv_webhook_background.sql",
+    "20261114011400_actv_mercadopago.sql",
+    "20261114011500_actv_mercadopago_reporting.sql",
+    "20261114011600_actv_runner_organizer_portals.sql",
+    "20261114011900_actv_organizer_event_detail.sql",
+    "20261126012000_actv_order_recovery_origin.sql"
+  ],
+  "functions": [
+    "actv-checkout",
+    "actv-organizer-connect",
+    "actv-stripe-terminal",
+    "actv-stripe-webhook",
+    "actv-stripe-reconcile",
+    "actv-admin-payments"
+  ],
+  "configurationNames": [
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "ACTV_LEGACY_WORDPRESS_ORIGIN",
+    "ACTV_PUBLIC_RACE_MODE",
+    "ACTV_APP_URL",
+    "ACTV_STRIPE_MODE",
+    "ACTV_STRIPE_SECRET_KEY",
+    "ACTV_STRIPE_WEBHOOK_SECRET",
+    "SUPABASE_URL",
+    "SUPABASE_SECRET_KEYS",
+    "ACTV_STRIPE_RECONCILE_SECRET",
+    "ACTV_STAFF_ORIGIN",
+    "SUPABASE_SERVICE_ROLE_KEY"
+  ],
+  "verification": "npm run verify",
+  "evidenceIndex": ".verification/evidence-index.json",
+  "openGates": [
+    "full operational schema/adoption baseline",
+    "applicable W0 decisions",
+    "hosted provider/configuration acceptance",
+    "tablet/PT210/card qualification",
+    "full retained-state recovery",
+    "W6 approval and W7 cutover"
+  ],
+  "migrationRule": "This is source composition, not permission to replay migrations or remove existing applied migration history."
+}

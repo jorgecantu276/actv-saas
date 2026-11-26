@@ -1,15 +1,19 @@
 import type { NextConfig } from "next";
+import { wordpressOrigin } from './lib/wordpress-origin';
 
 const nextConfig: NextConfig = {
   output: 'standalone',
-  typescript: {
-    // !! ADVERTENCIA !!
-    // Esto permite que el build termine incluso si hay errores de tipos.
-    ignoreBuildErrors: true,
+  async redirects() {
+    return [
+      { source: '/tienda/cuenta', destination: wordpressOrigin + '/ajustes/orders/', permanent: false },
+      { source: '/tienda/:path*', destination: wordpressOrigin + '/tienda/', permanent: false },
+      { source: '/producto/:path*', destination: wordpressOrigin + '/producto/:path*', permanent: false },
+      { source: '/carrito/:path*', destination: wordpressOrigin + '/carrito/:path*', permanent: false },
+      { source: '/finalizar-compra/:path*', destination: wordpressOrigin + '/finalizar-compra/:path*', permanent: false },
+    ];
   },
-  eslint: {
-    // También ignoramos avisos estéticos de ESLint para mayor velocidad
-    ignoreDuringBuilds: true,
+  images: {
+    remotePatterns: [new URL('/wp-content/uploads/**', wordpressOrigin)],
   },
 };
 

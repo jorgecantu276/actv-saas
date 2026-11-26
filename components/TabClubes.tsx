@@ -1,19 +1,21 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+
+import type { Athlete, Club, StaffScreenProps } from '../lib/legacy-types';
+import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 // ✅ IMPORTANTE: Se agregó MessageCircle para el botón de WhatsApp
-import { Shield, PlusCircle, Trash2, Edit, Users, Phone, ImageIcon, Share2, Camera, Globe, Save, Search, Download, FileSpreadsheet, ArrowUpDown, X, UserSearch, ChevronRight, ChevronLeft, UserCircle, ChevronDown, MessageCircle } from 'lucide-react'; 
+import { Shield, PlusCircle, Trash2, Edit, Users, Phone, ImageIcon, Share2, Camera, Globe, Save, Search, Download, FileSpreadsheet, ArrowUpDown, X, UserSearch, ChevronRight, ChevronLeft, UserCircle, ChevronDown, MessageCircle } from 'lucide-react';
 
-export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: any) {
+export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: Pick<StaffScreenProps, 'recargarDatos' | 'clubes' | 'atletas'>) {
   const [enviando, setEnviando] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
-  
+
   const [busquedaClub, setBusquedaClub] = useState('');
   const [orden, setOrden] = useState('az');
 
   // ✅ ESTADOS PARA EL PANEL DE ATLETAS DEL CLUB SELECCIONADO
-  const [selectedClubAthletes, setSelectedClubAthletes] = useState<any[]>([]);  
+  const [selectedClubAthletes, setSelectedClubAthletes] = useState<Athlete[]>([]);
   const [selectedClubName, setSelectedClubName] = useState<string | null>(null);
   const [busquedaAtletaLocal, setBusquedaAtletaLocal] = useState('');
   const [atletaCurrentPage, setAtletaCurrentPage] = useState(1);
@@ -39,7 +41,7 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
     e.preventDefault();
     setEnviando(true);
 
-    const datosParaEnviar: any = { ...form };
+    const datosParaEnviar: Record<keyof typeof form, string | null> = { ...form };
     if (!datosParaEnviar.logo_url || datosParaEnviar.logo_url.trim() === '') datosParaEnviar.logo_url = null;
     if (!datosParaEnviar.facebook_url || datosParaEnviar.facebook_url.trim() === '') datosParaEnviar.facebook_url = null;
     if (!datosParaEnviar.instagram_url || datosParaEnviar.instagram_url.trim() === '') datosParaEnviar.instagram_url = null;
@@ -67,7 +69,7 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
     setEnviando(false);
   };
 
-  const handleEdit = (club: any) => {
+  const handleEdit = (club: Club) => {
     // Cerramos el panel de atletas si está abierto antes de editar
     closeClubAthletesPanel();
     setEditandoId(club.id);
@@ -103,7 +105,7 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
 
   // ✅ FUNCIONES PARA EL PANEL LATERAL DE ATLETAS
   const handleSelectClubForAthletes = (clubName: string) => {
-    const clubAthletes = atletas.filter((atleta: any) => atleta.club === clubName);
+    const clubAthletes = atletas.filter((atleta) => atleta.club === clubName);
     setSelectedClubAthletes(clubAthletes);
     setSelectedClubName(clubName);
     setBusquedaAtletaLocal(''); // Reset buscador local
@@ -117,21 +119,21 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
   // ==========================================
   // LÓGICA DE FILTRADO, CONTEO Y ORDENAMIENTO (BLINDADO)
   // ==========================================
-  
+
   // 1. Primero mapeamos los clubes para agregarles el conteo exacto de atletas
-  let clubesConConteo = clubes.map((c: any) => {
-    const totalAtletas = atletas.filter((a: any) => a.club === c.nombre).length;
+  const clubesConConteo = clubes.map((c) => {
+    const totalAtletas = atletas.filter((a) => a.club === c.nombre).length;
     return { ...c, totalAtletas };
   });
 
   // 2. Filtramos por la barra de búsqueda (Clubes)
-  let clubesVisibles = clubesConConteo.filter((club: any) => 
+  const clubesVisibles = clubesConConteo.filter((club) =>
     club.nombre?.toLowerCase().includes(busquedaClub.toLowerCase()) ||
     club.responsable1?.toLowerCase().includes(busquedaClub.toLowerCase())
   );
 
   // 3. Ordenamos según el selector CON BLINDAJE DE ESPACIOS (.trim())
-  clubesVisibles.sort((a: any, b: any) => {
+  clubesVisibles.sort((a, b) => {
     const nombreA = String(a.nombre || '').trim();
     const nombreB = String(b.nombre || '').trim();
 
@@ -143,7 +145,7 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
   });
 
   // ✅ LÓGICA DEL PANEL DE ATLETAS (BUSQUEDA Y PAGINACIÓN LOCAL)
-  let atletasFiltradosLocal = selectedClubAthletes.filter((atleta: any) => {
+  const atletasFiltradosLocal = selectedClubAthletes.filter((atleta) => {
     const nombreCompleto = `${atleta.nombre} ${atleta.apellido}`.toLowerCase();
     return nombreCompleto.includes(busquedaAtletaLocal.toLowerCase());
   });
@@ -158,11 +160,11 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
   // ==========================================
   const exportarCSV = () => {
     const cabeceras = ['Nombre del Club', 'Total Atletas', 'Responsable 1', 'Teléfono 1', 'Responsable 2', 'Teléfono 2', 'Redes Sociales', 'Sitio Web'];
-    const filas = clubesVisibles.map((c: any) => [
+    const filas = clubesVisibles.map((c) => [
       c.nombre || '', c.totalAtletas || 0, c.responsable1 || '', c.telefono1 || '', c.responsable2 || '', c.telefono2 || '',
       `FB: ${c.facebook_url || 'N/A'}, IG: ${c.instagram_url || 'N/A'}`, c.web_url || 'N/A'
     ]);
-    const csvContent = [cabeceras.join(','), ...filas.map((r: any[]) => r.map((f: any) => `"${String(f ?? '')}"`).join(','))].join('\n');
+    const csvContent = [cabeceras.join(','), ...filas.map((r) => r.map((f) => `"${String(f ?? '')}"`).join(','))].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -173,10 +175,10 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
   // ✅ NUEVA FUNCIÓN: EXPORTAR A XLSX (.xls)
   const exportarXLSX = () => {
     let tablaHTML = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8" /></head><body><table>';
-    
+
     tablaHTML += '<tr><th>Folio</th><th>Nombre del Club</th><th>Total Atletas</th><th>Responsable 1</th><th>Teléfono 1</th><th>Responsable 2</th><th>Teléfono 2</th><th>Facebook</th><th>Instagram</th><th>Sitio Web</th></tr>';
-    
-    clubesVisibles.forEach((c: any, index: number) => {
+
+    clubesVisibles.forEach((c, index: number) => {
       tablaHTML += `<tr>
         <td>${index + 1}</td>
         <td>${c.nombre || ''}</td>
@@ -190,9 +192,9 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
         <td>${c.web_url || 'N/A'}</td>
       </tr>`;
     });
-    
+
     tablaHTML += '</table></body></html>';
-    
+
     const blob = new Blob([tablaHTML], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -202,14 +204,14 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-8 relative">
-      
+
       {/* ========================================================= */}
       {/* FORMULARIO DE REGISTRO / EDICIÓN ENTERPRISE                 */}
       {/* ========================================================= */}
       <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm ring-1 ring-slate-200">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-slate-100 pb-5 gap-4">
           <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center">
-            <Shield className="mr-2.5 text-blue-600 w-6 h-6" /> 
+            <Shield className="mr-2.5 text-blue-600 w-6 h-6" />
             {editandoId ? `Editando: ${form.nombre}` : 'Registrar Club Deportivo'}
           </h2>
           {editandoId && (
@@ -218,7 +220,7 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
             </button>
           )}
         </div>
-        
+
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             <div className="md:col-span-2 xl:col-span-3 space-y-1.5">
@@ -280,13 +282,13 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
       {/* BARRA DE BÚSQUEDA Y LISTADO COMPACTO DE CLUBES              */}
       {/* ========================================================= */}
       <div className="pt-8 border-t border-slate-100">
-        
+
         <div className="bg-white p-6 rounded-3xl ring-1 ring-slate-200 shadow-sm mb-6 no-print">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-5">
             <h3 className="text-xl font-black text-slate-900 tracking-tight shrink-0">Directorio de Clubes ({clubesVisibles.length})</h3>
-            
+
             <div className="flex flex-col md:flex-row gap-3 w-full lg:w-auto">
-              
+
               <div className="relative w-full md:w-64 group">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
                 <input type="text" placeholder="Buscar club por nombre o responsable..." value={busquedaClub} onChange={(e) => setBusquedaClub(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 focus:border-slate-400 rounded-xl outline-none focus:ring-4 focus:ring-slate-900/5 transition-all text-sm text-slate-900 placeholder:text-slate-400 font-medium" />
@@ -314,12 +316,12 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
             </div>
           </div>
         </div>
-        
+
         {/* LISTA COMPACTA DE CLUBES */}
         <div className="bg-white rounded-3xl shadow-sm ring-1 ring-slate-200 divide-y divide-slate-100 overflow-hidden no-print">
-          {clubesVisibles.map((club: any) => (
+          {clubesVisibles.map((club) => (
             <div key={club.id} className="p-5 flex flex-col md:flex-row items-center md:items-start gap-5 hover:bg-blue-50/50 transition-colors group relative">
-              
+
               <div className="w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden shrink-0">
                 {club.logo_url ? (
                   <img src={club.logo_url} alt={club.nombre} className="w-full h-full object-cover" />
@@ -327,13 +329,13 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
                   <Shield className="w-8 h-8 text-slate-200" />
                 )}
               </div>
-              
+
               <div className="flex-grow text-center md:text-left space-y-2">
                 <div className="flex items-center gap-3">
                   <h4 className="font-black text-slate-900 text-lg leading-none tracking-tight">{club.nombre}</h4>
                   <span className="bg-slate-900 text-white text-[9px] font-black uppercase px-2 py-0.5 mt-0.5 rounded tracking-widest">{club.responsable1}</span>
                 </div>
-                
+
                 <div className="flex flex-col md:flex-row md:items-center text-slate-600 text-xs gap-x-6 gap-y-1.5 pt-1">
                   <p className="flex items-center"><UserCircle className="w-3 h-3 mr-1.5 text-slate-400"/> {club.responsable1} ({club.telefono1})</p>
                   <p className="flex items-center"><UserCircle className="w-3 h-3 mr-1.5 text-slate-400"/> {club.responsable2 || 'N/A'} ({club.telefono2 || 'N/A'})</p>
@@ -346,9 +348,9 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
               </div>
 
               {/* Conteo de Atletas (Clickable) */}
-              <button 
-                onClick={() => handleSelectClubForAthletes(club.nombre)} 
-                title={`Ver ${club.totalAtletas} atletas de ${club.nombre}`} 
+              <button
+                onClick={() => handleSelectClubForAthletes(club.nombre)}
+                title={`Ver ${club.totalAtletas} atletas de ${club.nombre}`}
                 className="flex items-center gap-2.5 text-slate-700 hover:text-blue-600 bg-slate-100 hover:bg-white p-4 rounded-2xl group-hover:shadow-inner transition-all active:scale-95 shrink-0"
               >
                 <Users className="w-6 h-6 text-blue-500"/>
@@ -358,7 +360,7 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
                 </div>
                 <ChevronRight className="w-5 h-5 ml-1 text-slate-300"/>
               </button>
-              
+
               {/* ACCIONES (HOVER) */}
               <div className="absolute right-5 top-5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
                 <button onClick={() => handleEdit(club)} className="p-2 bg-white/80 backdrop-blur-sm border border-slate-200 text-slate-600 rounded-xl hover:bg-black hover:text-white hover:border-black transition-all shadow-sm" title="Editar Club">
@@ -388,12 +390,12 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-end z-[9999] no-print transition-all duration-500 animate-in fade-in" onClick={closeClubAthletesPanel}>
           <div className="bg-white w-full max-w-lg md:max-w-xl xl:max-w-2xl h-full shadow-2xl relative flex flex-col p-8 overflow-hidden animate-in slide-in-from-right duration-300" onClick={(e) => e.stopPropagation()}>
             <button type="button" onClick={closeClubAthletesPanel} className="absolute top-6 right-6 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-full p-2 transition-all"><X size={20}/></button>
-            
+
             <div className="mb-6">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center"><Users className="w-3 h-3 mr-1.5 text-blue-500"/> Integrantes del Club Deportivo</p>
               <h3 className="text-3xl font-black text-slate-900 leading-tight tracking-tight">{selectedClubName}</h3>
             </div>
-            
+
             {/* BUSCADOR LOCAL DE ATLETAS DEL CLUB */}
             <div className="relative group mb-6">
               <UserSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
@@ -409,7 +411,7 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
                 <>
                 {/* LISTADO DE ATLETAS (compacto) */}
                 <div className="space-y-4 overflow-y-auto pr-2 flex-grow scrollbar-actv">
-                    {atletasPaginadosLocal.map((atleta: any) => {
+                    {atletasPaginadosLocal.map((atleta) => {
                       // Formatear el teléfono para el link de WhatsApp (quitamos espacios y caracteres raros)
                       const telWhatsapp = atleta.telefono ? atleta.telefono.replace(/\D/g, '') : '';
 
@@ -422,7 +424,7 @@ export default function TabClubes({ recargarDatos, clubes = [], atletas = [] }: 
                                 <p className="font-bold text-slate-900">{atleta.nombre} {atleta.apellido}</p>
                                 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pt-0.5 line-clamp-1">{atleta.club} • Talla: {atleta.talla_playera || 'N/A'} • Gen: {atleta.genero || 'N/A'}</p>
                              </div>
-                             
+
                              {/* ACCIONES DE CONTACTO (LLAMADA Y WHATSAPP) */}
                              {atleta.telefono && (
                                 <div className="flex gap-1.5 shrink-0">

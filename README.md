@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ACTV supported source candidate
 
-## Getting Started
+Version **0.2.0-rc.1**, November 26, 2026. This consolidates the retained newer ACTV work into one reviewed source line. The [product board](https://github.com/users/jorgecantu276/projects/2), [scope](docs/project-scope.md), [plan](docs/implementation-plan.md), and [readiness](docs/implementation-readiness.json) remain the business/acceptance references.
 
-First, run the development server:
+## Supported composition
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Public race discovery and guest Stripe checkout; Mi ACTV private attendance/account workflows; organizer event operations; retained staff sales/athletes/kits/reports/quotations; payment/refund/reconciliation recovery. [Source manifest](ops/source-candidate.json) identifies functions, migration filenames, configuration names and remaining gates.
+
+The existing merchandise store keeps its redirects and recovery URLs. New storefront and timing/import experiments remain preserved in the original development checkout and are absent here. Shared SQL migrations 114/115 remain because Stripe/cash use their order/reporting contracts; unfinished Mercado Pago checkout cannot be enabled by environment settings. Timing migrations 117/118 are omitted from this source candidate. Never remove applied migration history or replay these files blindly on an existing database.
+
+## Reproduce verification
+
+Use Node 24, Git, Docker with Linux containers, and `npm ci`. Deno 2.9.6 is pinned in devDependencies. Then run:
+
+```powershell
+npm run verify
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+This runs lint, Node regressions, readiness validation, TypeScript, the Next build, Edge unit tests, a fresh PostgreSQL financial fixture, actual Edge handlers against that fixture, and portal permission/ownership contracts. It always creates its own labelled loopback-only disposable container and removes only that container. Inherited ACTV/provider/backend configuration is stripped and replaced with synthetic build/test settings. It does not use an existing local or hosted database, charge, send email, print, migrate production or deploy.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+PostgreSQL durability settings are relaxed only inside that disposable synthetic fixture. These checks prove transactional contract behavior, not crash durability or production performance. The fixture is a bounded payment/portal schema, not a copy of the full operational schema.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Logs and a source/configuration-mode/build/schema/function evidence index are written under ignored `.verification/`. GitHub CI runs this same command on the exact PR source SHA and retains its evidence artifact. Its workflow performs candidate verification only; production deployment requires the plan's separate W6/W7 evidence and acceptance.
 
-## Learn More
+For source development use `npm run dev` with isolated approved configuration. For status use `node ops/status.mjs`; it distinguishes source, recorded readiness, CI, publication and actual installation. Record validation and CI do not automatically accept an open release scenario.
 
-To learn more about Next.js, take a look at the following resources:
+## Remaining release gates
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The source version does not close full-schema/adoption, real tablet/PT210/card, hosted provider/configuration, recovery, operating-policy or cutover acceptance. See W0–W7 and [candidate details](docs/consolidation.md). Existing private records and the original dirty checkout were preserved.

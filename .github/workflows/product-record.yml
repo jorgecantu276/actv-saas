@@ -1,0 +1,18 @@
+name: ACTV product record
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  product-record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: node ops/status.mjs --check
+      - run: node --test ops/tests/status.test.mjs

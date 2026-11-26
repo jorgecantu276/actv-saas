@@ -1,17 +1,19 @@
 'use client';
 
+
+import type { RaceEvent, StaffScreenProps } from '../lib/legacy-types';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { PlusCircle, ImageIcon, Calendar, Users, MapPin, Edit, Trash2, Save, X, Info, ShieldAlert, Search, Hash, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { PlusCircle, ImageIcon, Calendar, Users, MapPin, Edit, Trash2, Save, X, ShieldAlert, Search, Hash, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
-export default function TabEventos({ recargarDatos, eventos = [], userRole, userId }: any) {
+export default function TabEventos({ recargarDatos, eventos = [], userRole, userId }: Pick<StaffScreenProps, 'recargarDatos' | 'eventos' | 'userRole' | 'userId'>) {
   console.log("Eventos recibidos del servidor:", eventos);
   const [enviando, setEnviando] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [misEventosPermitidos, setMisEventosPermitidos] = useState<string[]>([]);
-  
+
   // ESTADOS DE FILTRADO Y PAGINACIÓN
-  const [busquedaEvento, setBusquedaEvento] = useState(''); 
+  const [busquedaEvento, setBusquedaEvento] = useState('');
   const [viewMode, setViewMode] = useState<'activos' | 'pasados'>('activos');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -23,7 +25,7 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
     organizador: '',
     distancia: '',
     cupo_maximo: '500',
-    folio_inicial: '1', 
+    folio_inicial: '1',
     imagen_evento: '',
     descripcion: '',
     nombre_precio_1: 'Individual',
@@ -33,9 +35,7 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
   });
 
   // Resetear paginación si el usuario busca, cambia de pestaña o cambia el orden
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [busquedaEvento, viewMode, sortOrder]);
+
 
   // CARGAR PERMISOS DEL MODERADOR
   useEffect(() => {
@@ -56,20 +56,20 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
   const hoy = new Date().toISOString().split('T')[0];
 
   // 1. Filtrar por rol y por texto de búsqueda
-  const eventosBase = (userRole === 'Moderador' 
-    ? eventos.filter((ev: any) => misEventosPermitidos.includes(ev.id))
+  const eventosBase = (userRole === 'Moderador'
+    ? eventos.filter((ev) => misEventosPermitidos.includes(ev.id))
     : eventos)
-    .filter((ev: any) => ev.nombre_carrera.toLowerCase().includes(busquedaEvento.toLowerCase()));
+    .filter((ev) => ev.nombre_carrera.toLowerCase().includes(busquedaEvento.toLowerCase()));
 
   // 2. Dividir en Activos (Próximos) y Pasados
-  const eventosActivos = eventosBase.filter((ev: any) => ev.fecha >= hoy);
-  const eventosPasados = eventosBase.filter((ev: any) => ev.fecha < hoy);
+  const eventosActivos = eventosBase.filter((ev) => ev.fecha >= hoy);
+  const eventosPasados = eventosBase.filter((ev) => ev.fecha < hoy);
 
   // 3. Seleccionar la lista según la pestaña activa
-  let listaActual = viewMode === 'activos' ? eventosActivos : eventosPasados;
+  const listaActual = viewMode === 'activos' ? eventosActivos : eventosPasados;
 
   // 4. Aplicar el orden cronológico
-  listaActual.sort((a: any, b: any) => {
+  listaActual.sort((a, b) => {
     const timeA = new Date(a.fecha).getTime();
     const timeB = new Date(b.fecha).getTime();
     return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
@@ -91,7 +91,7 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
     setForm({ nombre_carrera: '', fecha: '', organizador: '', distancia: '', cupo_maximo: '500', folio_inicial: '1', imagen_evento: '', descripcion: '', nombre_precio_1: 'Individual', precio_1: '', nombre_precio_2: '', precio_2: '' });
   };
 
-  const handleEdit = (ev: any) => {
+  const handleEdit = (ev: RaceEvent) => {
     setEditandoId(ev.id);
     setForm({
       nombre_carrera: ev.nombre_carrera || '',
@@ -124,14 +124,14 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (userRole === 'Moderador' && !editandoId) {
       alert("Los moderadores no pueden crear nuevas carreras.");
       return;
     }
 
     setEnviando(true);
-    const datosEvento: any = { ...form };
+    const datosEvento: Record<keyof typeof form, string | null> = { ...form };
     if (!datosEvento.nombre_precio_2) datosEvento.nombre_precio_2 = null;
     if (!datosEvento.precio_2 || datosEvento.precio_2 === '') datosEvento.precio_2 = null;
 
@@ -154,7 +154,7 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-10">
-      
+
       {/* ========================================================= */}
       {/* FORMULARIO (SILICON VALLEY VIBE)                          */}
       {/* ========================================================= */}
@@ -223,7 +223,7 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm ring-1 ring-transparent focus-within:ring-slate-900 opacity-80 hover:opacity-100 focus-within:opacity-100 transition-all">
                   <p className="text-[10px] font-black text-slate-500 mb-3 uppercase tracking-widest">Paquete Secundario (Opcional)</p>
                   <div className="space-y-3">
@@ -261,21 +261,21 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
       {/* SECCIÓN DE LISTADO Y NAVEGACIÓN                             */}
       {/* ========================================================= */}
       <div className={`pt-6`}>
-        
+
         {/* CABECERA: TÍTULO, TABS Y FILTROS */}
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-6">
           <h3 className="text-xl font-black text-slate-900 tracking-tight shrink-0">
             {userRole === 'Administrador' ? 'Directorio de Carreras' : 'Mis Carreras Asignadas'}
           </h3>
-          
+
           <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto bg-white p-2 rounded-2xl ring-1 ring-slate-200 shadow-sm overflow-hidden">
-            
+
             {/* Pestañas Flotantes */}
             <div className="flex bg-slate-100 p-1 rounded-xl w-full md:w-auto shrink-0">
-              <button onClick={() => setViewMode('activos')} className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-xs font-bold transition-all ${viewMode === 'activos' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              <button onClick={() => { setViewMode('activos'); setCurrentPage(1); }} className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-xs font-bold transition-all ${viewMode === 'activos' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 Próximas ({eventosActivos.length})
               </button>
-              <button onClick={() => setViewMode('pasados')} className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-xs font-bold transition-all ${viewMode === 'pasados' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              <button onClick={() => { setViewMode('pasados'); setCurrentPage(1); }} className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-xs font-bold transition-all ${viewMode === 'pasados' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 Finalizadas ({eventosPasados.length})
               </button>
             </div>
@@ -285,11 +285,11 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
             {/* Buscador */}
             <div className="relative w-full md:w-56 shrink-0">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Buscar..." 
-                value={busquedaEvento} 
-                onChange={(e) => setBusquedaEvento(e.target.value)} 
+              <input
+                type="text"
+                placeholder="Buscar..."
+                value={busquedaEvento}
+                onChange={(e) => { setBusquedaEvento(e.target.value); setCurrentPage(1); }}
                 className="w-full pl-9 pr-3 py-2 bg-transparent text-sm outline-none text-slate-900 placeholder:text-slate-400 font-medium"
               />
             </div>
@@ -299,7 +299,7 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
             {/* Ordenamiento */}
             <div className="relative w-full md:w-auto shrink-0">
               <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
-              <select value={sortOrder} onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')} className="w-full pl-9 pr-8 py-2 bg-transparent text-xs font-bold text-slate-700 outline-none appearance-none cursor-pointer">
+              <select value={sortOrder} onChange={e => { setSortOrder(e.target.value as 'asc' | 'desc'); setCurrentPage(1); }} className="w-full pl-9 pr-8 py-2 bg-transparent text-xs font-bold text-slate-700 outline-none appearance-none cursor-pointer">
                 <option value="asc">Más próximas primero</option>
                 <option value="desc">Más lejanas primero</option>
               </select>
@@ -310,12 +310,12 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
 
         {/* GRID DE EVENTOS */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-          {paginatedList.map((ev: any) => {
-            const esPasado = viewMode === 'pasados'; 
-            
+          {paginatedList.map((ev) => {
+            const esPasado = viewMode === 'pasados';
+
             return (
               <div key={ev.id} className={`bg-white rounded-2xl overflow-hidden ring-1 transition-all flex flex-col group ${esPasado ? 'ring-slate-200 opacity-80 hover:opacity-100' : 'ring-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 hover:ring-slate-300'}`}>
-                
+
                 {/* Imagen del evento (Aspect Ratio Fijo) */}
                 <div className="relative w-full aspect-video bg-slate-100 overflow-hidden shrink-0">
                   {ev.imagen_evento ? (
@@ -358,7 +358,7 @@ export default function TabEventos({ recargarDatos, eventos = [], userRole, user
                     <button onClick={() => handleEdit(ev)} className="flex-grow bg-slate-50 text-slate-700 hover:bg-slate-100 hover:text-slate-900 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center border border-slate-200">
                       <Edit className="w-3.5 h-3.5 mr-1.5" /> Editar
                     </button>
-                    
+
                     {userRole === 'Administrador' && (
                       <button onClick={() => handleDelete(ev.id, ev.nombre_carrera)} className="bg-white border border-slate-200 text-slate-400 hover:bg-red-50 hover:border-red-200 hover:text-red-600 px-3.5 rounded-xl transition-colors shrink-0" title="Eliminar Carrera">
                         <Trash2 className="w-4 h-4" />

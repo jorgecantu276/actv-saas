@@ -1,27 +1,28 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+
+import { useClientReady } from '../lib/use-client-ready';
+import type { Client, Service, Quote, StaffScreenProps } from '../lib/legacy-types';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
-import { FileText, Users, Briefcase, PlusCircle, X, Save, Calculator, Percent, CheckCircle, Printer, Mail, Phone, Calendar, Edit, Trash2, Search, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown } from 'lucide-react';
+import { FileText, Users, Briefcase, PlusCircle, X, Calculator, Percent, CheckCircle, Printer, Mail, Phone, Calendar, Edit, Trash2, Search, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown } from 'lucide-react';
 
-export default function TabCotizaciones({ userRole }: any) {
-  const [isMounted, setIsMounted] = useState(false);
-  useEffect(() => { setIsMounted(true); }, []);
+export default function TabCotizaciones({ userRole }: Pick<StaffScreenProps, 'userRole'>) {
+  const isMounted = useClientReady();
 
-  const [clientes, setClientes] = useState<any[]>([]);
-  const [servicios, setServicios] = useState<any[]>([]);
-  const [cotizaciones, setCotizaciones] = useState<any[]>([]);
-  const [cargando, setCargando] = useState(true);
+  const [clientes, setClientes] = useState<Client[]>([]);
+  const [servicios, setServicios] = useState<Service[]>([]);
+  const [cotizaciones, setCotizaciones] = useState<Quote[]>([]);
 
   const [showModalCliente, setShowModalCliente] = useState(false);
   const [showModalServicio, setShowModalServicio] = useState(false);
   const [showModalCotizacion, setShowModalCotizacion] = useState(false);
-  
-  const [cotizacionParaImprimir, setCotizacionParaImprimir] = useState<any | null>(null);
+
+  const [cotizacionParaImprimir, setCotizacionParaImprimir] = useState<Quote | null>(null);
   const [tipoImpresion, setTipoImpresion] = useState<'carta' | 'ticket' | null>(null);
 
-  const [editandoServicio, setEditandoServicio] = useState<any | null>(null);
+  const [editandoServicio, setEditandoServicio] = useState<Service | null>(null);
   const [formEditServicio, setFormEditServicio] = useState({ nombre: '', precio_unitario: '', tipo_cobro: 'Fijo' });
 
   const [formCliente, setFormCliente] = useState({ nombre_completo: '', empresa_o_club: '', telefono: '', email: '' });
@@ -29,7 +30,7 @@ export default function TabCotizaciones({ userRole }: any) {
   const [formCotizacion, setFormCotizacion] = useState({
     cliente_id: '', nombre_evento: '', fecha_evento: '', asistentes_esperados: 0, descuento: 0, tipo_descuento: 'Fijo'
   });
-  const [serviciosSeleccionados, setServiciosSeleccionados] = useState<string[]>([]); 
+  const [serviciosSeleccionados, setServiciosSeleccionados] = useState<string[]>([]);
   const [guardando, setGuardando] = useState(false);
 
   const [preciosCustom, setPreciosCustom] = useState<Record<string, string | number>>({});
@@ -39,28 +40,28 @@ export default function TabCotizaciones({ userRole }: any) {
 
   const [paginaActual, setPaginaActual] = useState(1);
   const cotizacionesPorPagina = 25;
+  const cambiarBusquedaCotizacion = (value: string) => { setBusquedaCotizacion(value); setPaginaActual(1); };
+  const cambiarOrdenCotizacion = (value: string) => { setOrdenCotizacion(value); setPaginaActual(1); };
 
-  useEffect(() => {
-    setPaginaActual(1);
-  }, [busquedaCotizacion, ordenCotizacion]);
 
-  useEffect(() => {
-    cargarDatosB2B();
-  }, []);
-
-  const cargarDatosB2B = async () => {
-    setCargando(true);
-    const [resClientes, resServicios, resCotizaciones] = await Promise.all([
-      supabase.from('clientes').select('*').order('created_at', { ascending: false }),
-      supabase.from('servicios').select('*').order('nombre', { ascending: true }),
-      supabase.from('cotizaciones').select('*, clientes(*)').order('created_at', { ascending: false })
-    ]);
-
+  const consultarDatosB2B = useCallback(() => Promise.all([
+    supabase.from('clientes').select('*').order('created_at', { ascending: false }),
+    supabase.from('servicios').select('*').order('nombre', { ascending: true }),
+    supabase.from('cotizaciones').select('*, clientes(*)').order('created_at', { ascending: false }),
+  ]), []);
+  const aplicarDatosB2B = useCallback(([resClientes, resServicios, resCotizaciones]: Awaited<ReturnType<typeof consultarDatosB2B>>) => {
     if (resClientes.data) setClientes(resClientes.data);
     if (resServicios.data) setServicios(resServicios.data);
     if (resCotizaciones.data) setCotizaciones(resCotizaciones.data);
-    setCargando(false);
-  };
+  }, []);
+  const cargarDatosB2B = async () => aplicarDatosB2B(await consultarDatosB2B());
+
+  useEffect(() => {
+    let active = true;
+    void consultarDatosB2B().then(result => { if (active) aplicarDatosB2B(result); });
+    return () => { active = false; };
+  }, [consultarDatosB2B, aplicarDatosB2B]);
+
 
   const calcularTotales = () => {
     let subtotal = 0;
@@ -85,7 +86,7 @@ export default function TabCotizaciones({ userRole }: any) {
     }
 
     const subtotalConDescuento = subtotal - totalDescuentoDinero;
-    const iva = subtotalConDescuento > 0 ? subtotalConDescuento * 0.16 : 0; 
+    const iva = subtotalConDescuento > 0 ? subtotalConDescuento * 0.16 : 0;
     const total = (subtotalConDescuento > 0 ? subtotalConDescuento : 0) + iva;
 
     return { subtotal, iva, descuento: totalDescuentoDinero, total };
@@ -93,7 +94,7 @@ export default function TabCotizaciones({ userRole }: any) {
 
   const { subtotal, iva, total, descuento: montoDescuentoCalculado } = calcularTotales();
 
-  const manejarImpresion = (cot: any, formato: 'carta' | 'ticket') => {
+  const manejarImpresion = (cot: Quote, formato: 'carta' | 'ticket') => {
     setTipoImpresion(formato);
     setCotizacionParaImprimir(cot);
     setTimeout(() => {
@@ -101,23 +102,23 @@ export default function TabCotizaciones({ userRole }: any) {
     }, 500);
   };
 
-  const enviarWhatsApp = (cot: any) => {
+  const enviarWhatsApp = (cot: Quote) => {
     const telefonoOriginal = cot.clientes?.telefono || '';
-    const telefonoLimpio = telefonoOriginal.replace(/\D/g, ''); 
+    const telefonoLimpio = telefonoOriginal.replace(/\D/g, '');
 
     const tipoDesc = cot.tipo_descuento || 'Fijo';
     let txtDesc = '';
-    if (parseFloat(cot.descuento) > 0) {
+    if (parseFloat(String(cot.descuento)) > 0) {
       if (tipoDesc === 'Porcentaje') txtDesc = `\nDescuento: ${cot.descuento}%`;
       else if (tipoDesc === 'Por Atleta') txtDesc = `\nDescuento: $${cot.descuento} x Atleta`;
       else txtDesc = `\nDescuento: $${cot.descuento} MXN`;
     }
 
-    const msj = `Hola ${cot.clientes?.nombre_completo || 'Cliente'}, le compartimos el resumen de su cotización de ACTV:\n\n*COT-${String(cot.folio).padStart(4, '0')}*\nEvento: ${cot.nombre_evento}\nAtletas Proyectados: ${cot.asistentes_esperados}\n${txtDesc}\n*Total Neto: $${parseFloat(cot.total).toLocaleString('es-MX')} MXN*\n\nSi desea ver el documento completo en PDF, háganoslo saber. ¡Estamos a sus órdenes!\n\nactv.mx`;
+    const msj = `Hola ${cot.clientes?.nombre_completo || 'Cliente'}, le compartimos el resumen de su cotización de ACTV:\n\n*COT-${String(cot.folio).padStart(4, '0')}*\nEvento: ${cot.nombre_evento}\nAtletas Proyectados: ${cot.asistentes_esperados}\n${txtDesc}\n*Total Neto: $${parseFloat(String(cot.total)).toLocaleString('es-MX')} MXN*\n\nSi desea ver el documento completo en PDF, háganoslo saber. ¡Estamos a sus órdenes!\n\nactv.mx`;
     window.open(`https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(msj)}`, '_blank');
   };
 
-  const handleGuardarCliente = async (e: any) => {
+  const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault();
     setGuardando(true);
     const { error } = await supabase.from('clientes').insert([formCliente]);
@@ -125,7 +126,7 @@ export default function TabCotizaciones({ userRole }: any) {
     setGuardando(false);
   };
 
-  const handleGuardarServicio = async (e: any) => {
+  const handleGuardarServicio = async (e: React.FormEvent) => {
     e.preventDefault();
     setGuardando(true);
     const { error } = await supabase.from('servicios').insert([formServicio]);
@@ -133,13 +134,14 @@ export default function TabCotizaciones({ userRole }: any) {
     setGuardando(false);
   };
 
-  const abrirEdicionServicio = (srv: any) => {
+  const abrirEdicionServicio = (srv: Service) => {
     setEditandoServicio(srv);
     setFormEditServicio({ nombre: srv.nombre, precio_unitario: srv.precio_unitario, tipo_cobro: srv.tipo_cobro });
   };
 
-  const handleActualizarServicio = async (e: any) => {
+  const handleActualizarServicio = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editandoServicio) return;
     setGuardando(true);
     const { error } = await supabase.from('servicios').update(formEditServicio).eq('id', editandoServicio.id);
     if (!error) { setEditandoServicio(null); cargarDatosB2B(); }
@@ -154,18 +156,24 @@ export default function TabCotizaciones({ userRole }: any) {
     }
   };
 
-  const handleGuardarCotizacion = async (e: any) => {
+  const handleGuardarCotizacion = async (e: React.FormEvent) => {
     e.preventDefault();
+    const serviciosElegidos = serviciosSeleccionados
+      .map(id => servicios.find(service => service.id === id))
+      .filter((service): service is Service => service !== undefined);
+    if (serviciosElegidos.length !== serviciosSeleccionados.length) {
+      alert('Un servicio seleccionado ya no está disponible. Revisa la cotización.');
+      return;
+    }
     setGuardando(true);
 
-    const carrito = serviciosSeleccionados.map(id => {
-      const srv = servicios.find(s => s.id === id);
+    const carrito = serviciosElegidos.map(srv => {
       const precioFinal = preciosCustom[srv.id] !== undefined ? Number(preciosCustom[srv.id]) : Number(srv.precio_unitario);
-      
-      return { 
-        id: srv.id, 
-        nombre: srv.nombre, 
-        precio_unitario: precioFinal, 
+
+      return {
+        id: srv.id,
+        nombre: srv.nombre,
+        precio_unitario: precioFinal,
         tipo: srv.tipo_cobro,
         total_linea: (srv.tipo_cobro === 'Por Atleta') ? (precioFinal * formCotizacion.asistentes_esperados) : precioFinal
       };
@@ -176,8 +184,8 @@ export default function TabCotizaciones({ userRole }: any) {
       nombre_evento: formCotizacion.nombre_evento,
       fecha_evento: formCotizacion.fecha_evento || null,
       asistentes_esperados: formCotizacion.asistentes_esperados,
-      descuento: montoDescuentoCalculado, 
-      tipo_descuento: formCotizacion.tipo_descuento, 
+      descuento: montoDescuentoCalculado,
+      tipo_descuento: formCotizacion.tipo_descuento,
       desglose_servicios: carrito,
       subtotal,
       iva,
@@ -189,7 +197,7 @@ export default function TabCotizaciones({ userRole }: any) {
       setShowModalCotizacion(false);
       setFormCotizacion({ cliente_id: '', nombre_evento: '', fecha_evento: '', asistentes_esperados: 0, descuento: 0, tipo_descuento: 'Fijo' });
       setServiciosSeleccionados([]);
-      setPreciosCustom({}); 
+      setPreciosCustom({});
       cargarDatosB2B();
     } else {
       const { error: err2 } = await supabase.from('cotizaciones').insert([{
@@ -217,9 +225,9 @@ export default function TabCotizaciones({ userRole }: any) {
     setServiciosSeleccionados([]);
   };
 
-  let cotizacionesVisibles = cotizaciones
-    .filter(c => 
-      c.nombre_evento?.toLowerCase().includes(busquedaCotizacion.toLowerCase()) || 
+  const cotizacionesVisibles = cotizaciones
+    .filter(c =>
+      c.nombre_evento?.toLowerCase().includes(busquedaCotizacion.toLowerCase()) ||
       c.clientes?.nombre_completo?.toLowerCase().includes(busquedaCotizacion.toLowerCase()) ||
       `COT-${String(c.folio).padStart(4, '0')}`.toLowerCase().includes(busquedaCotizacion.toLowerCase())
     )
@@ -240,7 +248,7 @@ export default function TabCotizaciones({ userRole }: any) {
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-8 relative">
-      
+
       <style jsx global>{`
         @media screen {
           .print-only { display: none !important; }
@@ -258,7 +266,7 @@ export default function TabCotizaciones({ userRole }: any) {
 
       {/* SECCIÓN 1: COTIZACIONES */}
       <div className="space-y-6 no-print">
-        
+
         {/* CABECERA */}
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm ring-1 ring-slate-200">
           <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center border-b border-slate-100 pb-5 gap-4">
@@ -279,19 +287,19 @@ export default function TabCotizaciones({ userRole }: any) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
             <div className="md:col-span-2 relative group">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
-              <input 
-                type="text" 
-                placeholder="Buscar por folio, evento o cliente..." 
+              <input
+                type="text"
+                placeholder="Buscar por folio, evento o cliente..."
                 value={busquedaCotizacion}
-                onChange={(e) => setBusquedaCotizacion(e.target.value)}
+                onChange={(e) => cambiarBusquedaCotizacion(e.target.value)}
                 className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 focus:border-slate-400 focus:ring-4 focus:ring-slate-900/5 rounded-xl outline-none text-sm text-slate-900 placeholder:text-slate-400 font-medium transition-all"
               />
             </div>
             <div className="relative">
               <ArrowUpDown className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-              <select 
-                value={ordenCotizacion} 
-                onChange={(e) => setOrdenCotizacion(e.target.value)}
+              <select
+                value={ordenCotizacion}
+                onChange={(e) => cambiarOrdenCotizacion(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl pl-11 pr-8 py-3 outline-none focus:border-slate-400 font-bold appearance-none cursor-pointer transition-all"
               >
                 <option value="reciente">Más recientes</option>
@@ -333,7 +341,7 @@ export default function TabCotizaciones({ userRole }: any) {
                       <p className="text-[10px] text-slate-400 font-black uppercase mt-0.5 bg-slate-100 w-fit px-1.5 rounded">{c.clientes?.empresa_o_club || 'Particular'}</p>
                     </td>
                     <td className="px-6 py-4 text-center font-bold text-slate-600 text-base">{c.asistentes_esperados.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-right font-black text-slate-900 text-base">${parseFloat(c.total || 0).toLocaleString('es-MX')}</td>
+                    <td className="px-6 py-4 text-right font-black text-slate-900 text-base">${parseFloat(String(c.total || 0)).toLocaleString('es-MX')}</td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => enviarWhatsApp(c)} className="p-2 bg-white border border-slate-200 text-green-600 rounded-xl hover:bg-green-50 hover:border-green-200 transition-all shadow-sm" title="Enviar Resumen WhatsApp">
@@ -367,7 +375,7 @@ export default function TabCotizaciones({ userRole }: any) {
               Mostrando <span className="text-slate-900">{indexPrimeraCot + 1}</span> a <span className="text-slate-900">{Math.min(indexUltimaCot, cotizacionesVisibles.length)}</span> de <span className="text-slate-900">{cotizacionesVisibles.length}</span> cotizaciones emitidas
             </p>
             <div className="flex gap-2">
-              <button 
+              <button
                 onClick={() => setPaginaActual(prev => Math.max(prev - 1, 1))}
                 disabled={paginaActual === 1}
                 className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
@@ -377,7 +385,7 @@ export default function TabCotizaciones({ userRole }: any) {
               <div className="flex items-center px-5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-black text-slate-700 uppercase tracking-widest">
                 Página {paginaActual} / {totalPaginasCot}
               </div>
-              <button 
+              <button
                 onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginasCot))}
                 disabled={paginaActual === totalPaginasCot}
                 className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
@@ -412,7 +420,7 @@ export default function TabCotizaciones({ userRole }: any) {
               {servicios.map(s => (
                 <tr key={s.id} className="hover:bg-slate-50/80 transition-colors group">
                   <td className="px-6 py-4 font-bold text-slate-900 text-sm">{s.nombre}</td>
-                  <td className="px-6 py-4 font-black text-slate-700">${parseFloat(s.precio_unitario).toLocaleString('es-MX')}</td>
+                  <td className="px-6 py-4 font-black text-slate-700">${parseFloat(String(s.precio_unitario)).toLocaleString('es-MX')}</td>
                   <td className="px-6 py-4"><span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase">{s.tipo_cobro}</span></td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
@@ -471,7 +479,7 @@ export default function TabCotizaciones({ userRole }: any) {
           {/* max-h-[90vh] y my-auto aseguran el scroll interno centrado perfecto en celulares */}
           <div className="bg-white rounded-[32px] p-6 md:p-10 max-w-5xl w-full shadow-2xl relative animate-in zoom-in-95 duration-200 my-auto max-h-[90vh] overflow-y-auto custom-scrollbar grid grid-cols-1 lg:grid-cols-5 gap-8">
             <button onClick={cerrarModalCotizacion} className="absolute top-6 right-6 text-slate-400 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-full p-2 z-20 transition-all"><X size={18}/></button>
-            
+
             {/* LADO IZQUIERDO: FORMULARIO */}
             <div className="lg:col-span-3 order-2 lg:order-1">
               <div className="border-b pb-4 mb-6">
@@ -520,11 +528,11 @@ export default function TabCotizaciones({ userRole }: any) {
                           <div className="flex items-center gap-3 justify-between sm:justify-end">
                             <div className={`flex items-center border rounded-xl px-3 py-1.5 transition-all ${isSelected ? 'bg-white border-slate-400 shadow-sm' : 'bg-slate-50 border-slate-200'}`}>
                               <span className="text-slate-400 text-xs font-black mr-1.5">$</span>
-                              <input 
-                                type="number" 
-                                step="0.01" 
-                                value={precioActual} 
-                                onClick={(e) => e.stopPropagation()} 
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={precioActual}
+                                onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => setPreciosCustom({...preciosCustom, [s.id]: e.target.value})}
                                 className="w-20 text-right text-sm font-black text-slate-900 outline-none bg-transparent"
                               />
@@ -548,12 +556,12 @@ export default function TabCotizaciones({ userRole }: any) {
                 <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6 border-b border-slate-800 pb-3">Resumen Comercial</h3>
                 <div className="space-y-4 relative z-10">
                   <div className="flex justify-between text-slate-400 text-sm"><span>Subtotal</span><span className="font-bold text-white">${subtotal.toLocaleString('es-MX')}</span></div>
-                  
+
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                     <div className="flex justify-between items-center">
                       <span className="text-xs font-bold text-slate-400 flex items-center"><Percent className="w-3 h-3 mr-1"/> Tipo Descuento</span>
                       <div className="relative">
-                        <select 
+                        <select
                           className="bg-transparent text-[10px] uppercase font-black outline-none text-slate-300 tracking-wider text-right cursor-pointer pr-4 appearance-none"
                           value={formCotizacion.tipo_descuento}
                           onChange={e => setFormCotizacion({...formCotizacion, tipo_descuento: e.target.value})}
@@ -567,7 +575,7 @@ export default function TabCotizaciones({ userRole }: any) {
                     </div>
                     <div className="flex justify-between items-center text-slate-400">
                       <span className="text-xs font-medium">Monto / Valor:</span>
-                      <input type="number" step="0.01" className="w-24 bg-slate-900 border border-slate-700 rounded-lg p-1.5 text-right text-sm font-black outline-none text-white focus:border-slate-500" value={formCotizacion.descuento || ''} onChange={e => setFormCotizacion({...formCotizacion, descuento: parseFloat(e.target.value) || 0})} placeholder="0.00" />
+                      <input type="number" step="0.01" className="w-24 bg-slate-900 border border-slate-700 rounded-lg p-1.5 text-right text-sm font-black outline-none text-white focus:border-slate-500" value={formCotizacion.descuento || ''} onChange={e => setFormCotizacion({...formCotizacion, descuento: parseFloat(String(e.target.value)) || 0})} placeholder="0.00" />
                     </div>
                     {montoDescuentoCalculado > 0 && (
                       <div className="text-right text-[10px] text-red-400 font-bold pt-1 border-t border-slate-900">- ${montoDescuentoCalculado.toLocaleString('es-MX')} Aplicados</div>
@@ -675,9 +683,9 @@ export default function TabCotizaciones({ userRole }: any) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {cotizacionParaImprimir.desglose_servicios?.map((srv: any, idx: number) => {
-                    const pUnitario = parseFloat(srv.precio_unitario || srv.precio_aplicado || 0);
-                    const tLinea = parseFloat(srv.total_linea || (srv.tipo === 'Por Atleta' ? pUnitario * (cotizacionParaImprimir.asistentes_esperados || 0) : pUnitario));
+                  {cotizacionParaImprimir.desglose_servicios?.map((srv, idx: number) => {
+                    const pUnitario = parseFloat(String(srv.precio_unitario || srv.precio_aplicado || 0));
+                    const tLinea = parseFloat(String(srv.total_linea || (srv.tipo === 'Por Atleta' ? pUnitario * (cotizacionParaImprimir.asistentes_esperados || 0) : pUnitario)));
                     return (
                       <tr key={idx} className="text-sm">
                         <td className="p-4 font-bold text-slate-800">{srv.nombre}</td>
@@ -691,15 +699,15 @@ export default function TabCotizaciones({ userRole }: any) {
               </table>
               <div className="flex justify-end mt-10">
                 <div className="w-72 space-y-3">
-                  <div className="flex justify-between text-slate-500 font-bold text-sm"><span>Subtotal:</span><span className="text-slate-900">${parseFloat(cotizacionParaImprimir.subtotal || 0).toLocaleString('es-MX')}</span></div>
-                  {parseFloat(cotizacionParaImprimir.descuento || 0) > 0 && (
+                  <div className="flex justify-between text-slate-500 font-bold text-sm"><span>Subtotal:</span><span className="text-slate-900">${parseFloat(String(cotizacionParaImprimir.subtotal || 0)).toLocaleString('es-MX')}</span></div>
+                  {parseFloat(String(cotizacionParaImprimir.descuento || 0)) > 0 && (
                     <div className="flex justify-between text-red-500 font-bold text-sm">
                       <span>Desc. {cotizacionParaImprimir.tipo_descuento === 'Porcentaje' ? '(%)' : cotizacionParaImprimir.tipo_descuento === 'Por Atleta' ? '(X Atleta)' : '($)'}:</span>
-                      <span>-${parseFloat(cotizacionParaImprimir.descuento).toLocaleString('es-MX')}</span>
+                      <span>-${parseFloat(String(cotizacionParaImprimir.descuento)).toLocaleString('es-MX')}</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-slate-500 font-bold text-sm border-b pb-3"><span>I.V.A. (16%):</span><span className="text-slate-900">${parseFloat(cotizacionParaImprimir.iva || 0).toLocaleString('es-MX')}</span></div>
-                  <div className="flex justify-between items-end pt-3 text-slate-900"><span className="text-xs font-black uppercase">Total Neto</span><span className="text-3xl font-black text-indigo-600">${parseFloat(cotizacionParaImprimir.total || 0).toLocaleString('es-MX')} MXN</span></div>
+                  <div className="flex justify-between text-slate-500 font-bold text-sm border-b pb-3"><span>I.V.A. (16%):</span><span className="text-slate-900">${parseFloat(String(cotizacionParaImprimir.iva || 0)).toLocaleString('es-MX')}</span></div>
+                  <div className="flex justify-between items-end pt-3 text-slate-900"><span className="text-xs font-black uppercase">Total Neto</span><span className="text-3xl font-black text-indigo-600">${parseFloat(String(cotizacionParaImprimir.total || 0)).toLocaleString('es-MX')} MXN</span></div>
                 </div>
               </div>
               <div className="mt-20 pt-10 border-t border-slate-100 grid grid-cols-2 gap-10">
@@ -732,9 +740,9 @@ export default function TabCotizaciones({ userRole }: any) {
               <p style={{ fontSize: '9pt' }}><strong>Evento:</strong> {cotizacionParaImprimir.nombre_evento}</p>
               <p style={{ fontSize: '9pt' }}><strong>Atletas Proy:</strong> {cotizacionParaImprimir.asistentes_esperados}</p>
               <p>==========================</p>
-              {cotizacionParaImprimir.desglose_servicios?.map((srv: any, idx: number) => {
-                const pUnitario = parseFloat(srv.precio_unitario || srv.precio_aplicado || 0);
-                const tLinea = parseFloat(srv.total_linea || (srv.tipo === 'Por Atleta' ? pUnitario * (cotizacionParaImprimir.asistentes_esperados || 0) : pUnitario));
+              {cotizacionParaImprimir.desglose_servicios?.map((srv, idx: number) => {
+                const pUnitario = parseFloat(String(srv.precio_unitario || srv.precio_aplicado || 0));
+                const tLinea = parseFloat(String(srv.total_linea || (srv.tipo === 'Por Atleta' ? pUnitario * (cotizacionParaImprimir.asistentes_esperados || 0) : pUnitario)));
                 return (
                   <div key={idx} style={{ marginBottom: '5px', fontSize: '8pt' }}>
                     <p style={{ fontWeight: '900', margin: 0 }}>{srv.nombre}</p>
@@ -747,13 +755,13 @@ export default function TabCotizaciones({ userRole }: any) {
               })}
               <p style={{ marginTop: '5px' }}>==========================</p>
               <div style={{ fontSize: '9pt', textAlign: 'right' }}>
-                <p>Sub: ${parseFloat(cotizacionParaImprimir.subtotal || 0).toLocaleString('es-MX')}</p>
-                {parseFloat(cotizacionParaImprimir.descuento || 0) > 0 && (
-                  <p>Desc: -${parseFloat(cotizacionParaImprimir.descuento).toLocaleString('es-MX')}</p>
+                <p>Sub: ${parseFloat(String(cotizacionParaImprimir.subtotal || 0)).toLocaleString('es-MX')}</p>
+                {parseFloat(String(cotizacionParaImprimir.descuento || 0)) > 0 && (
+                  <p>Desc: -${parseFloat(String(cotizacionParaImprimir.descuento)).toLocaleString('es-MX')}</p>
                 )}
-                <p>IVA: ${parseFloat(cotizacionParaImprimir.iva || 0).toLocaleString('es-MX')}</p>
+                <p>IVA: ${parseFloat(String(cotizacionParaImprimir.iva || 0)).toLocaleString('es-MX')}</p>
               </div>
-              <p style={{ fontSize: '12pt', fontWeight: '900', textAlign: 'right', marginTop: '5px' }}>NETO: ${parseFloat(cotizacionParaImprimir.total || 0).toLocaleString('es-MX')}</p>
+              <p style={{ fontSize: '12pt', fontWeight: '900', textAlign: 'right', marginTop: '5px' }}>NETO: ${parseFloat(String(cotizacionParaImprimir.total || 0)).toLocaleString('es-MX')}</p>
               <p style={{ marginTop: '10px' }}>==========================</p>
               <div style={{ fontSize: '7.5pt', textAlign: 'center', marginTop: '5px' }}>
                 <p>Vigencia 15 dias.</p>
