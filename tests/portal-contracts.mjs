@@ -120,7 +120,9 @@ try {
   assert.deepEqual((await rpc('actv_runner_dashboard', [], outsider)).registrations, []);
   assertions += 6;
 
-  const otherRace = await rpc('actv_create_organizer_event', ['Other synthetic race', day, 'other-' + suffix, 50000, 10, '10K'], owner);
+  const otherRace = await rpc('actv_operations_save_event', [randomUUID(), {
+    ...raceInput[1], name: 'Other synthetic race', slug: 'other-' + suffix, distance: '10K',
+  }], owner);
   await denied('actv_record_attendance', [otherRace.event_id, registration], owner, 'P0002');
   await db.query('delete from actv_payments.members where organizer_id=$1 and user_id=$2', [organizer.organizer_id, owner]);
   await denied('actv_organizer_event_detail', [race.event_id], owner);
