@@ -56,7 +56,7 @@ function digests(directory) {
 
 try {
   await run('lint', node, ['node_modules/eslint/bin/eslint.js', '.']);
-  await run('unit', node, ['--test', 'ops/tests/status.test.mjs', 'tests/runner-history.test.mjs', 'tests/legacy-store.test.mjs', 'tests/candidate-composition.test.mjs']);
+  await run('unit', node, ['--test', 'ops/tests/status.test.mjs', 'tests/runner-history.test.mjs', 'tests/legacy-store.test.mjs', 'tests/candidate-composition.test.mjs', 'tests/staff-provisioning.test.mjs', 'tests/staging-bindings.test.mjs']);
   await run('record', node, ['ops/status.mjs', '--check']);
   await run('types', node, ['node_modules/typescript/bin/tsc', '--noEmit']);
   await run('build', node, ['node_modules/next/dist/bin/next', 'build', '--webpack']);
@@ -79,6 +79,9 @@ try {
   await run('edge-postgres', node, [...denoArgs, 'run', '--allow-env', `--allow-net=127.0.0.1:${port}`,
     '--config', 'supabase/functions/deno.json', 'tests/staging-edge.ts']);
   await run('portal-contracts', node, ['tests/portal-contracts.mjs']);
+  await run('full-staging', node, ['scripts/full-staging.mjs']);
+  check.fullStagingEvidenceSha256 = createHash('sha256').update(readFileSync(join(artifactDirectory, 'full-staging.json'))).digest('hex');
+  check.baselineCatalogSha256 = createHash('sha256').update(readFileSync(join(root, 'tests/staging/baseline-catalog.json'))).digest('hex');
   check.inputs = [...digests('supabase/migrations'), ...digests('supabase/functions')];
   check.buildId = readFileSync(join(root, '.next/BUILD_ID'), 'utf8').trim();
   check.buildManifestSha256 = createHash('sha256').update(readFileSync(join(root, '.next/server/app-paths-manifest.json'))).digest('hex');

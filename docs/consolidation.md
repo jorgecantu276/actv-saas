@@ -1,3 +1,5 @@
+Current follow-up: source candidate 0.2.0-rc.2 adds the [complete captured staging baseline and staff lifecycle](staging-baseline.md). The record below describes the earlier 0.2.0-rc.1 consolidation and its then-open gaps.
+
 # Consolidation of the November ACTV work
 
 Source candidate: 0.2.0-rc.1, branch codex/actv-supported-candidate, based on the payment foundation and product-standard branch. The immutable tested source SHA is recorded by CI in .verification/evidence-index.json; current Git/PR is authoritative, not the version string alone.

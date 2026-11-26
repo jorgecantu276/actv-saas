@@ -1,8 +1,8 @@
 {
-  "version": "0.2.0-rc.1",
+  "version": "0.2.0-rc.2",
   "product": "ACTV",
   "kind": "source_candidate",
-  "sourceRef": "codex/actv-supported-candidate",
+  "sourceRef": "codex/actv-staging-staff",
   "productionQualified": false,
   "supported": [
     "legacy staff workflows",
@@ -36,7 +36,8 @@
     "20261114011500_actv_mercadopago_reporting.sql",
     "20261114011600_actv_runner_organizer_portals.sql",
     "20261114011900_actv_organizer_event_detail.sql",
-    "20261126012000_actv_order_recovery_origin.sql"
+    "20261126012000_actv_order_recovery_origin.sql",
+    "20261126012100_actv_staff_lifecycle.sql"
   ],
   "functions": [
     "actv-checkout",
@@ -64,12 +65,17 @@
   "verification": "npm run verify",
   "evidenceIndex": ".verification/evidence-index.json",
   "openGates": [
-    "full operational schema/adoption baseline",
+    "hosted operational adoption and actual configuration acceptance",
     "applicable W0 decisions",
     "hosted provider/configuration acceptance",
     "tablet/PT210/card qualification",
     "full retained-state recovery",
     "W6 approval and W7 cutover"
   ],
-  "migrationRule": "This is source composition, not permission to replay migrations or remove existing applied migration history."
+  "migrationRule": "This is source composition, not permission to replay migrations or remove existing applied migration history.",
+  "operationalBaseline": {
+    "catalog": "tests/staging/baseline-catalog.json",
+    "verification": "npm run test:staging:full",
+    "scope": "Captured application schema on actual isolated local Supabase services; clean and retained-record adoption with no copied production rows"
+  }
 }

@@ -129,6 +129,12 @@
       "scope": "consolidated_source_candidate",
       "reference": "ops/source-candidate.json; CI artifact .verification/evidence-index.json at the tested revision",
       "supports": "Preserved newer supported source, exact migration composition and reproducible synthetic source verification. Not full production-schema adoption, hosted provider acceptance, device or cutover proof."
+    },
+    {
+      "id": "E10",
+      "scope": "complete_local_operational_baseline_and_staff_lifecycle",
+      "reference": "docs/staging-baseline.md; tests/staging/baseline-catalog.json; CI artifact .verification/full-staging.json",
+      "supports": "Fresh metadata-derived nine-table baseline, actual local Auth/Storage/PostgREST, clean/retained-record migration and staff provisioning/revocation contracts. Not hosted configuration, storage privacy/retention, device or cutover acceptance."
     }
   ],
   "benchmark_method": {
@@ -881,10 +887,10 @@
     }
   ],
   "source_consolidation": {
-    "version": "0.2.0-rc.1",
-    "ref": "codex/actv-supported-candidate",
+    "version": "0.2.0-rc.2",
+    "ref": "codex/actv-staging-staff",
     "manifest": "ops/source-candidate.json",
     "verification_command": "npm run verify",
-    "scope": "Source candidate; full operational schema, hosted/device evidence and production release remain unqualified."
+    "scope": "Source candidate with complete captured operational baseline on isolated actual Supabase services and atomic staff lifecycle; hosted/device/cutover acceptance remains unqualified."
   }
 }
