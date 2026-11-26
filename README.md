@@ -1,6 +1,6 @@
 # ACTV supported source candidate
 
-Version **0.2.0-rc.3**, November 26, 2026. This adds private kit evidence with recoverable cleanup, shared server receipts and sales pause/recovery to the supported source line. The [product board](https://github.com/users/jorgecantu276/projects/2), [scope](docs/project-scope.md), [plan](docs/implementation-plan.md), and [readiness](docs/implementation-readiness.json) remain the business/acceptance references.
+Version **0.2.0-rc.4**, November 26, 2026. This adds order-time registration snapshots, audited corrections and one permission-based event operations workspace. The [product board](https://github.com/users/jorgecantu276/projects/2), [scope](docs/project-scope.md), [plan](docs/implementation-plan.md), and [readiness](docs/implementation-readiness.json) remain the business/acceptance references.
 
 ## Supported composition
 
@@ -10,7 +10,7 @@ The existing merchandise store keeps its redirects and recovery URLs. New storef
 
 ## Reproduce verification
 
-Use Node 24, Git, Docker with Linux containers, and `npm ci`. Deno 2.9.6 is pinned in devDependencies. Then run:
+Use Node 24, Git, Docker with Linux containers, and `npm ci`. Deno 2.9.6 and Playwright are pinned in devDependencies. Install the verification browser with `node node_modules/playwright/cli.js install --only-shell chromium` (Linux also needs `--with-deps`). Then run:
 
 ```powershell
 npm run verify
@@ -31,3 +31,5 @@ The complete captured operational baseline and staff lifecycle are verified loca
 The [complete staging baseline and staff lifecycle](docs/staging-baseline.md) describes the fresh catalog comparison, actual local services, atomic role/assignment management and retained-identity recovery.
 
 The [evidence, receipt and sales recovery guide](docs/evidence-receipts-recovery.md) describes the new controls, safe defaults and remaining operating decisions. Installing this candidate keeps new sales paused until an authorized manager explicitly opens them.
+
+The [registration and operations guide](docs/registration-operations.md) describes immutable order-time facts, audited corrections and the shared event workspace at `/operaciones`.

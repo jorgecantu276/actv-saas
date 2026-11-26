@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
+import RegistrationConsentFields from './RegistrationConsentFields';
+import { consentFor, type RegistrationConsent, type RegistrationPolicy } from '../lib/registration-contract';
 
 export type Cart = {
   eventId: string;
   relay: boolean;
-  items: { athlete_id: string; package: 1 | 2 }[];
+  items: { athlete_id: string; package: 1 | 2; consent?: RegistrationConsent }[];
 };
 
 type Channel = 'cash' | 'terminal';
@@ -122,6 +124,24 @@ export default function CajaCobros({
   const [recent, setRecent] = useState<RecoverableOrder[]>([]);
   const [recoveryId, setRecoveryId] = useState('');
   const busy = useRef(false);
+  const [policy, setPolicy] = useState<RegistrationPolicy | null>(null);
+  const [policyReady, setPolicyReady] = useState(false);
+  const [acceptance, setAcceptance] = useState<Record<string, { notice: boolean; waiver: boolean }>>({});
+  const cartEvent = cart?.eventId;
+  const policyGeneration = useRef(0);
+  const readPolicy = useCallback(async () => {
+    const generation = ++policyGeneration.current;
+    setPolicy(null); setPolicyReady(false); setAcceptance({});
+    if (!cartEvent) return;
+    const { data, error } = await supabase.rpc('actv_registration_policy', { p_event_id: cartEvent });
+    if (generation !== policyGeneration.current) return;
+    if (error) throw new Error('No se pudo consultar la información de inscripción. Actualiza antes de preparar la orden.');
+    setPolicy(data as RegistrationPolicy); setPolicyReady(true);
+  }, [cartEvent]);
+  useEffect(() => {
+    void readPolicy().catch(error => setMessage(error.message));
+    return () => { policyGeneration.current++; };
+  }, [readPolicy]);
 
   const storeDraft = useCallback((value: Draft | null) => {
     if (value) sessionStorage.setItem(key, JSON.stringify({
@@ -230,8 +250,17 @@ export default function CajaCobros({
     if (error) throw error;
     if ((data as SalesStatus).paused) throw new Error('Las ventas están pausadas. Puedes consultar órdenes y recibos existentes.');
     if (!cart) return;
+    if (!policyReady) throw new Error('Consulta los requisitos de inscripción antes de preparar la orden.');
+    if (cart.items.some(item => (policy?.notice_version && !acceptance[item.athlete_id]?.notice)
+      || (policy?.waiver_version && !acceptance[item.athlete_id]?.waiver))) {
+      throw new Error('Muestra los documentos y registra la aceptación de cada participante antes de preparar la orden.');
+    }
     if (channel === 'cash' && !shift) throw new Error('Abre un turno de Caja para cobrar en efectivo.');
-    const attempt = { cart, channel, requestId: crypto.randomUUID() };
+    const acceptedCart = { ...cart, items: cart.items.map(item => ({ ...item,
+      ...(consentFor(policy, acceptance[item.athlete_id]?.notice ?? false, acceptance[item.athlete_id]?.waiver ?? false)
+        ? { consent: consentFor(policy, acceptance[item.athlete_id]?.notice ?? false, acceptance[item.athlete_id]?.waiver ?? false) } : {}),
+    })) };
+    const attempt = { cart: acceptedCart, channel, requestId: crypto.randomUUID() };
     storeDraft(attempt);
     await createOrder(attempt);
   });
@@ -448,8 +477,15 @@ export default function CajaCobros({
         </div>
 
         {message && <p role="alert" className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">{message}</p>}
+        {!draft && cart && <button type="button" disabled={loading} className={secondary} onClick={() => void run(readPolicy)}>Actualizar requisitos y documentos</button>}
+        {!draft && cart && (policy?.notice_version || policy?.waiver_version) && <div className="space-y-3">{cart.items.map((item, index) => <section key={item.athlete_id}>
+          <h4 className="mb-2 text-sm font-bold">Participante {index + 1}</h4>
+          <RegistrationConsentFields policy={policy} staff notice={acceptance[item.athlete_id]?.notice ?? false} waiver={acceptance[item.athlete_id]?.waiver ?? false}
+            onNotice={value => setAcceptance(previous => ({ ...previous, [item.athlete_id]: { notice: value, waiver: previous[item.athlete_id]?.waiver ?? false } }))}
+            onWaiver={value => setAcceptance(previous => ({ ...previous, [item.athlete_id]: { waiver: value, notice: previous[item.athlete_id]?.notice ?? false } }))} />
+        </section>)}</div>}
         {!order && (
-          <button type="button" disabled={!ready || loading || (!draft && (!cart || !sales || sales.paused))} className={submit} onClick={prepare}>
+          <button type="button" disabled={!ready || loading || (!draft && (!cart || !sales || sales.paused || !policyReady))} className={submit} onClick={prepare}>
             {draft ? 'Recuperar orden' : 'Preparar orden'}
           </button>
         )}

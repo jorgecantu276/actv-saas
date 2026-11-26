@@ -55,7 +55,7 @@
     },
     {
       "id": "receipts",
-      "authority": "Authorized server receipt DTO and one sale renderer to complete in W3/W4",
+      "authority": "Authorized server receipt DTO using registration snapshots and audited corrections, rendered by one sale component",
       "owner_role": "engineering_primary",
       "targets": [
         "components/CajaCobros.tsx",
@@ -141,6 +141,12 @@
       "scope": "source_candidate_evidence_receipts_sales_recovery",
       "reference": "docs/evidence-receipts-recovery.md; CI artifact .verification/full-staging.json at the tested revision",
       "supports": "Candidate private evidence access, handover/cleanup recovery, authoritative sale receipts and sales pause/original-order recovery contracts. Approved retention, hosted scheduler/rollout, physical printing and full W6/W7 acceptance remain separate."
+    },
+    {
+      "id": "E12",
+      "scope": "source_candidate_registration_snapshots_and_operations",
+      "reference": "docs/registration-operations.md; CI artifact .verification/full-staging.json at the tested revision",
+      "supports": "Immutable all-channel order-time participant/package/event/consent snapshots, revision/idempotency-protected corrections, snapshot receipts/kits/rosters and permission-based event operations. No approved legal policy, personal ownership, hosted/device or whole-release qualification is inferred."
     }
   ],
   "benchmark_method": {
@@ -893,10 +899,10 @@
     }
   ],
   "source_consolidation": {
-    "version": "0.2.0-rc.3",
-    "ref": "codex/actv-evidence-receipts-gate",
+    "version": "0.2.0-rc.4",
+    "ref": "codex/actv-snapshots-operations",
     "manifest": "ops/source-candidate.json",
     "verification_command": "npm run verify",
-    "scope": "Source candidate with private kit evidence, durable cleanup, authoritative shared sale receipts and server sales pause/recovery on the complete isolated staging baseline; policy, hosted, device and cutover acceptance remain unqualified."
+    "scope": "Source candidate with order-time registration/consent snapshots, audited corrections and a unified event operations workspace with bounded scoped reads. Hosted, policy, device, operator and cutover acceptance remain unqualified."
   }
 }

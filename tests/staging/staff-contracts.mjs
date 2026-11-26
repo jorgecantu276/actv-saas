@@ -45,6 +45,7 @@ export async function seedLegacyState(context) {
   const legacyStaff = await identity(admin, 'retained-staff');
   const athlete = randomUUID(), race = randomUUID(), otherRace = randomUUID(), registration = randomUUID();
   const evidenceAthlete = randomUUID(), evidenceRegistration = randomUUID(), evidenceReferenceRegistration = randomUUID();
+  const orphanRegistration = randomUUID();
   await db.query(`insert into public.eventos(id,nombre_carrera,fecha,organizador,distancia,precio_1,cupo_maximo)
     values($1,'Synthetic retained race',current_date+7,'ACTV','5K',500,10),
           ($2,'Synthetic other race',current_date+7,'ACTV','10K',500,10)`, [race, otherRace]);
@@ -59,6 +60,8 @@ export async function seedLegacyState(context) {
   await db.query(`insert into public.inscripciones(id,atleta_id,evento_id,folio_asignado,monto_pagado,metodo_pago)
     values($1,$2,$3,'EVIDENCE-SYNTHETIC',500,'efectivo'),
           ($4,$2,$3,'EVIDENCE-REFERENCE',500,'efectivo')`, [evidenceRegistration, evidenceAthlete, race, evidenceReferenceRegistration]);
+  await db.query(`insert into public.inscripciones(id,atleta_id,evento_id,folio_asignado,monto_pagado,metodo_pago)
+    values($1,null,$2,'RETAINED-UNKNOWN',500,'efectivo')`, [orphanRegistration, race]);
   const objectPath = 'synthetic-staging-' + randomUUID() + '.txt';
   const objectBytes = Buffer.from('ACTV synthetic retained kit evidence. No participant data.');
   const uploaded = await admin.storage.from('evidencias_kits').upload(objectPath, objectBytes, { contentType: 'text/plain' });
@@ -72,7 +75,7 @@ export async function seedLegacyState(context) {
   const club = (await db.query("insert into public.clubes(nombre) values('Synthetic retained club') returning id")).rows[0].id;
   const snapshot = (await db.query(`select id,atleta_id,evento_id,folio_asignado,monto_pagado,metodo_pago,usuario_id,foto_evidencia
     from public.inscripciones where id=$1`, [registration])).rows[0];
-  return { manager, legacyStaff, race, otherRace, athlete, registration, evidenceRegistration, evidenceReferenceRegistration, client, service, quote, club, snapshot, objectPath, objectBytes };
+  return { manager, legacyStaff, race, otherRace, athlete, registration, evidenceRegistration, evidenceReferenceRegistration, orphanRegistration, client, service, quote, club, snapshot, objectPath, objectBytes };
 }
 
 export async function verifyStaffLifecycle(context, retained) {

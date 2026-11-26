@@ -1,5 +1,6 @@
 import { FunctionsHttpError, type FunctionInvokeOptions } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import type { RegistrationPolicy } from '@/lib/registration-contract';
 
 export type PackageNumber = 1 | 2;
 export type OnlineProvider = 'stripe' | 'mercadopago';
@@ -13,6 +14,7 @@ export type Race = {
   paymentProviders?: OnlineProvider[];
   limits?: { maxParticipants?: number };
   options: { id: PackageNumber; name: string; amountMinor: number; currency: string }[];
+  registrationPolicy?: RegistrationPolicy;
 };
 
 export type OrderStatus = {

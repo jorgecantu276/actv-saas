@@ -7,8 +7,10 @@ import { formattedPrice, goToCheckout, orderStatusPath, paymentFunction, Payment
 import { PublicSite, raceDate } from '../../_pagos/public-site';
 import { RacePhoto } from '../../_pagos/race-art';
 import styles from '../../_pagos/race-journey.module.css';
+import RegistrationConsentFields from '../../../components/RegistrationConsentFields';
+import { consentFor, participantFields, type ParticipantData } from '../../../lib/registration-contract';
 
-type Participant = {
+type Participant = ParticipantData & {
   nombre: string;
   apellido: string;
   telefono: string;
@@ -17,11 +19,12 @@ type Participant = {
   package: PackageNumber;
 };
 
-type ParticipantForm = Participant & { rowId: string };
+type ParticipantForm = Participant & { rowId: string; noticeAccepted: boolean; waiverAccepted: boolean };
 
 const newParticipant = (option: PackageNumber): ParticipantForm => ({
   rowId: crypto.randomUUID(), package: option, nombre: '', apellido: '', telefono: '',
   telefono_emergencia: '', talla_playera: '',
+  noticeAccepted: false, waiverAccepted: false,
 });
 
 const fields = [
@@ -62,7 +65,7 @@ export default function Checkout({ slug }: { slug: string }) {
     return () => request.abort();
   }, [slug, reload]);
 
-  function updateParticipant(rowId: string, change: Partial<Participant>) {
+  function updateParticipant(rowId: string, change: Partial<ParticipantForm>) {
     setParticipants((current) => current.map((item) => item.rowId === rowId ? { ...item, ...change } : item));
   }
 
@@ -72,13 +75,13 @@ export default function Checkout({ slug }: { slug: string }) {
     const payload = {
       eventId: race.id,
       buyerEmail: buyerEmail.trim().toLowerCase(),
-      participants: participants.map(({ nombre, apellido, telefono, telefono_emergencia, talla_playera, package: selectedPackage }) => ({
-        nombre: nombre.trim(), apellido: apellido.trim(), telefono: telefono.trim(),
-        telefono_emergencia: telefono_emergencia.trim(), talla_playera, package: selectedPackage,
+      participants: participants.map(({ rowId: _rowId, noticeAccepted, waiverAccepted, ...participant }) => ({
+        ...Object.fromEntries(Object.entries(participant).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])),
+        consent: consentFor(race.registrationPolicy ?? null, noticeAccepted, waiverAccepted),
       })),
     };
-    if (payload.participants.some(({ nombre, apellido, telefono, telefono_emergencia }) =>
-      !nombre || !apellido || telefono.length < 7 || telefono_emergencia.length < 7)) {
+    if (participants.some(({ nombre, apellido, telefono, telefono_emergencia }) =>
+      !nombre.trim() || !apellido.trim() || telefono.trim().length < 7 || telefono_emergencia.trim().length < 7)) {
       setError('Completa el nombre, apellido y los teléfonos de cada participante.');
       return;
     }
@@ -171,7 +174,13 @@ export default function Checkout({ slug }: { slug: string }) {
                           {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((size) => <option key={size}>{size}</option>)}
                         </select>
                       </label>
+                      {participantFields.filter(([key]) => !['nombre', 'apellido', 'telefono', 'telefono_emergencia', 'talla_playera'].includes(key)
+                        && race.registrationPolicy?.required_fields.includes(key)).map(([key, label, type, max]) => <label key={key} className={styles.field}>{label}
+                        <input className={styles.input} type={type} maxLength={max} required value={participant[key] ?? ''} onChange={event => updateParticipant(participant.rowId, { [key]: event.target.value })} />
+                      </label>)}
                     </div>
+                    <RegistrationConsentFields policy={race.registrationPolicy ?? null} notice={participant.noticeAccepted} waiver={participant.waiverAccepted}
+                      onNotice={value => updateParticipant(participant.rowId, { noticeAccepted: value })} onWaiver={value => updateParticipant(participant.rowId, { waiverAccepted: value })} />
                   </section>
                 ))}
                 {participants.length < maxParticipants && (
@@ -198,6 +207,7 @@ export default function Checkout({ slug }: { slug: string }) {
                     </label>)}
                   </fieldset>}
                   {error && <p role="alert" className={styles.error}>{error}</p>}
+                  {error && !lockedProvider && <button type="button" className={styles.outline} onClick={() => { setLoading(true); setReload(value => value + 1); }}>Actualizar carrera y documentos</button>}
                   <button type="submit" className={styles.action} disabled={submitting}>
                     {submitting ? 'Abriendo pago…' : `Continuar a ${providerLabels[provider]}`} <ArrowRight size={19} aria-hidden="true" />
                   </button>

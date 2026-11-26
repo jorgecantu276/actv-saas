@@ -1,6 +1,6 @@
 # ACTV product and delivery report
 
-Updated November 26, 2026. Supported source candidate **0.2.0-rc.3** adds private kit evidence and cleanup, shared sale receipts and server sales pause/recovery on codex/actv-evidence-receipts-gate. [Details and limits](../evidence-receipts-recovery.md), [manifest](../../ops/source-candidate.json), [product board](https://github.com/users/jorgecantu276/projects/2).
+Updated November 26, 2026. Supported source candidate **0.2.0-rc.4** adds registration snapshots, audited corrections and unified event operations on codex/actv-snapshots-operations. [Details and limits](../evidence-receipts-recovery.md), [manifest](../../ops/source-candidate.json), [product board](https://github.com/users/jorgecantu276/projects/2).
 
 | Product | Outcome | Source progress | Next release gate |
 |---|---|---|---|

@@ -33,6 +33,7 @@ interface Catalog {
   currency: string;
   payment_providers?: ('stripe' | 'mercadopago')[];
   packages: Array<{ package: number; name: string; amount: number; currency?: string }>;
+  registration_policy?: Record<string, unknown>;
 }
 
 async function createBoundCheckout(stripe: Stripe, order: Order, account: string) {
@@ -81,6 +82,7 @@ export const checkoutHandler = handler('actv-checkout', async (request) => {
         date,
         description,
         available,
+        registrationPolicy: catalog.registration_policy,
         paymentProviders: (catalog.payment_providers ?? ['stripe']).filter((provider) =>
           provider === 'stripe' || mercadoPagoEnabled()
         ),

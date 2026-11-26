@@ -80,6 +80,26 @@ async function applySql(db, sql) {
   finally { try { await client.query('RESET ALL'); } finally { client.release(); } }
 }
 
+async function waitForRestSchema(context) {
+  // NOTIFY is asynchronous. Wait for the read-only API schema to include the
+  // installed contracts before testing them; never retry a write or reinterpret
+  // PGRST202 as an authorization denial.
+  const required = ['actv_evidence_adopt_legacy', 'actv_sale_receipt', 'actv_staff_recent_orders',
+    'actv_registration_record', 'actv_correct_registration', 'actv_operations_roster', 'actv_operations_clubs'];
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const response = await fetch(context.apiUrl + '/rest/v1/', { headers: {
+      apikey: context.serviceKey, authorization: 'Bearer ' + context.serviceKey,
+    }, signal: AbortSignal.timeout(Math.min(3000, Math.max(1, deadline - Date.now()))) }).catch(() => null);
+    if (response?.ok) {
+      const schema = await response.json();
+      if (required.every(name => schema.paths?.['/rpc/' + name])) return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw Error('Local REST schema did not become ready for the installed contracts');
+}
+
 async function schemaFingerprint(db) {
   const { rows } = await db.query(`select jsonb_build_object(
     'tables',(select jsonb_agg(jsonb_build_object('schema',n.nspname,'table',c.relname,'rls',c.relrowsecurity,
@@ -275,6 +295,7 @@ export async function runFullStaging() {
     await migrate();
     // REST has to observe the newly installed RPCs and grants before API tests.
     await db.query("notify pgrst, 'reload schema'");
+    await waitForRestSchema(context);
     const adoptionFingerprint = await schemaFingerprint(db);
     assert.equal(adoptionFingerprint, cleanFingerprint, 'Clean/adoption schema results must match');
     assert.equal((await db.query('select paused from actv_payments.sales_control')).rows[0].paused, true);
@@ -283,6 +304,10 @@ export async function runFullStaging() {
       ['private_evidence_and_cleanup', '../tests/staging/evidence-contracts.mjs', 'verifyEvidenceContracts'],
       ['shared_sale_receipts', '../tests/staging/receipt-contracts.mjs', 'verifyReceiptContracts'],
       ['sales_pause_and_recovery', '../tests/staging/sales-contracts.mjs', 'verifySalesContracts'],
+      ['registration_snapshots_and_corrections', '../tests/staging/registration-contracts.mjs', 'verifyRegistrationContracts'],
+      ['unified_event_operations', '../tests/staging/operations-contracts.mjs', 'verifyOperationsContracts'],
+      ['bounded_club_operations', '../tests/staging/club-contracts.mjs', 'verifyClubContracts'],
+      ['browser_event_operations', '../tests/staging/operations-browser.mjs', 'verifyOperationsBrowser'],
     ]) {
       console.log('[full-staging] ' + name);
       const suite = await import(modulePath);

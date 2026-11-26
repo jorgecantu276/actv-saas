@@ -134,33 +134,20 @@ export default function TabCaja({ atletas, eventos, recargarDatos, userRole, use
     e.preventDefault();
     if (!aceptoTerminos) { alert("Por favor, acepta los términos y condiciones para continuar."); return; }
 
-    const normalizarTexto = (txt: string) =>
-      String(txt || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-
-    const obtenerUltimos4 = (tel: string) =>
-      String(tel || '').replace(/\D/g, '').slice(-4);
-
-    const inputNombre = normalizarTexto(formQuickAtleta.nombre);
-    const inputApellido = normalizarTexto(formQuickAtleta.apellido);
-
+    setEnviando(true);
     const telLimpioInput = formQuickAtleta.telefono.replace(/\D/g, '');
-    const telefonoCompletoInput = `${ladaTelefono}${telLimpioInput}`;
-    const inputUltimos4 = obtenerUltimos4(telefonoCompletoInput);
-
-    const atletaDuplicado = (atletas || []).find((atl) => {
-      const atlNombre = normalizarTexto(atl.nombre);
-      const atlApellido = normalizarTexto(atl.apellido);
-      const atlUltimos4 = obtenerUltimos4(atl.telefono);
-
-      return atlNombre === inputNombre && atlApellido === inputApellido && atlUltimos4 === inputUltimos4;
+    const telefonoCompletoInput = ladaTelefono + telLimpioInput;
+    const { data: duplicate, error: duplicateError } = await supabase.rpc('actv_operations_athlete_duplicate', {
+      p_name: formQuickAtleta.nombre.trim(), p_surname: formQuickAtleta.apellido.trim(),
+      p_phone_last4: telLimpioInput.slice(-4),
     });
-
-    if (atletaDuplicado) {
-      alert(`⚠️ ¡Atleta ya registrado!\n\nSe detectó una coincidencia en el sistema:\n• Nombre: ${atletaDuplicado.nombre} ${atletaDuplicado.apellido}\n• Teléfono: ${atletaDuplicado.telefono}\n\nNo es necesario crearlo de nuevo, búscalo directamente en la barra superior para agregarlo a la venta.`);
+    if (duplicateError || duplicate) {
+      setEnviando(false);
+      alert(duplicateError ? 'No se pudo verificar si el atleta existe. Consulta antes de crear otra ficha.'
+        : 'Ya existe una ficha con ese nombre y contacto. Búscala en el directorio antes de crear otra.');
       return;
     }
 
-    setEnviando(true);
     const datos: Record<keyof typeof formQuickAtleta, string | null> & { usuario_id?: string | null } = { ...formQuickAtleta };
     if (!datos.email || datos.email.trim() === '') datos.email = null;
     if (!datos.fecha_nacimiento || datos.fecha_nacimiento.trim() === '') datos.fecha_nacimiento = null;
