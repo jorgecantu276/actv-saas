@@ -41,6 +41,14 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
   const link = await linking.getByLabel('Enlace privado de invitación', { exact: true }).inputValue();
   check((await db.query('select count(*)::int n from actv_payments.participant_invitations where registration_id=$1', [registration.id])).rows[0].n === 1);
   check(new URL(link).pathname === '/mi-actv'); check(new URL(link).search === ''); check(/^#vincular=[a-f0-9]{64}$/.test(new URL(link).hash));
+  const managerNavigations = [];
+  let managerLoads = 0, managerRefreshMessages = 0;
+  const navigation = frame => { if (frame === managerPage.mainFrame()) managerNavigations.push(new URL(frame.url()).pathname); };
+  const loaded = () => { managerLoads++; };
+  const consoleMessage = message => { if (/Fast Refresh|rebuilding|full reload/i.test(message.text())) managerRefreshMessages++; };
+  managerPage.on('framenavigated', navigation);
+  managerPage.on('load', loaded);
+  managerPage.on('console', consoleMessage);
   const recipientContext = await browser.newContext({ serviceWorkers: 'block' });
   try {
     let external = 0;
@@ -75,6 +83,21 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
     check(external === 0);
 
     mark('staff invitation detail close after recipient flow');
+    const managerAuthority = (await db.query('select active,role from actv_payments.staff where user_id=$1', [manager.id])).rows[0];
+    console.info('ACTV linking browser safe manager-return diagnostic: ' + JSON.stringify({
+      pathname: new URL(managerPage.url()).pathname,
+      navigations: managerNavigations,
+      loads: managerLoads,
+      refreshMessages: managerRefreshMessages,
+      headings: await managerPage.locator('h1,h2,h3').allTextContents(),
+      buttons: await managerPage.getByRole('button').allTextContents(),
+      detailCloseButtons: await managerPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).count(),
+      linkingRegions: await managerPage.getByRole('region', { name: 'Vinculación personal del participante', exact: true }).count(),
+      registrationRegions: await managerPage.getByRole('region', { name: 'Datos e historial de inscripción', exact: true }).count(),
+      expectedParticipantRows: await row.count(),
+      expectedManagerHeader: await managerPage.getByText(manager.email, { exact: false }).count() > 0,
+      managerAuthority,
+    }));
     await managerPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click();
     mark('original attendance observation');
     await row.getByRole('button', { name: 'Registrar asistencia', exact: true }).click();
@@ -125,7 +148,12 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
     check((await db.query('select count(*)::int n from actv_payments.runner_entries where registration_id=$1', [registration.id])).rows[0].n === 1);
     return { assertions, privateFragmentInvitation: true, lostResponseCreateAndAcceptRecovery: true, realRecipientBrowserLogin: true, auditedAttendanceCorrection: true, staleAttendanceRevisionRecovery: true,
       cashParticipantRefund: true, eventCancellation: true, preservedPersonalOwnership: true };
-  } finally { await recipientContext.close(); }
+  } finally {
+    managerPage.off('framenavigated', navigation);
+    managerPage.off('load', loaded);
+    managerPage.off('console', consoleMessage);
+    await recipientContext.close();
+  }
   } catch (error) {
     // A failed goto can include the private fragment in Playwright's message.
     // Expose only a fixed phase and error class, never URLs, DOM or tokens.
