@@ -211,9 +211,9 @@ declare r public.inscripciones; s actv_payments.attendance_state; c actv_payment
  end if;
  select * into strict r from public.inscripciones where id=p_registration_id;
  perform from public.eventos where id=r.evento_id and (not p_present or fecha<=(now() at time zone 'America/Matamoros')::date
- or exists(select 1 from actv_payments.attendance a join actv_payments.attendance_state s using(registration_id)
+ or exists(select 1 from actv_payments.attendance a join actv_payments.attendance_state observation using(registration_id)
  left join actv_payments.registration_snapshots snap using(registration_id) where a.registration_id=r.id
- and coalesce(s.observed_event_date,(snap.original#>>'{event,date}')::date,(snap.effective#>>'{event,date}')::date)
+ and coalesce(observation.observed_event_date,(snap.original#>>'{event,date}')::date,(snap.effective#>>'{event,date}')::date)
  <=(now() at time zone 'America/Matamoros')::date)) for share;
  if not found then raise exception 'No se confirma asistencia futura' using errcode='23514'; end if;
  perform from public.inscripciones where id=r.id for update;
@@ -259,4 +259,3 @@ grant execute on function public.actv_event_lifecycle(uuid),public.actv_transiti
 public.actv_attendance_history(uuid),public.actv_correct_attendance(uuid,integer,uuid,boolean,text) to authenticated;
 notify pgrst,'reload schema';
 commit;
-
