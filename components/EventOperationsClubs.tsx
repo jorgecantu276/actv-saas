@@ -51,6 +51,7 @@ export default function EventOperationsClubs() {
 
   useEffect(() => {
     const controller = new AbortController();
+    const timer = setTimeout(() => {
     setLoading(true); setError('');
     void (async () => {
       try {
@@ -64,12 +65,14 @@ export default function EventOperationsClubs() {
         if (!controller.signal.aborted) { setResult(null); setError((failure as { message?: string }).message || 'No se pudo cargar el directorio.'); }
       } finally { if (!controller.signal.aborted) setLoading(false); }
     })();
-    return () => controller.abort();
+    }, 180);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [query, sort, offset, refresh]);
 
   useEffect(() => {
     if (!selected) return;
     const controller = new AbortController();
+    const timer = setTimeout(() => {
     setMembersLoading(true); setMembers(null); setMemberError('');
     void (async () => {
       try {
@@ -83,7 +86,8 @@ export default function EventOperationsClubs() {
         if (!controller.signal.aborted) setMemberError((failure as { message?: string }).message || 'No se pudieron cargar los integrantes.');
       } finally { if (!controller.signal.aborted) setMembersLoading(false); }
     })();
-    return () => controller.abort();
+    }, 180);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [selected, memberQuery, memberOffset, refresh]);
   useEffect(() => () => exportController.current?.abort(), []);
 
@@ -189,7 +193,7 @@ export default function EventOperationsClubs() {
             <div className="mt-2 flex flex-wrap gap-3 text-sm">{(['facebook_url', 'instagram_url', 'web_url'] as const).map(key => safeUrl(club[key]) && <a key={key} href={safeUrl(club[key])} target="_blank" rel="noopener noreferrer" className="underline">{labels[key]}</a>)}</div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={loading || busy} onClick={() => { setSelected(club); setMemberQuery(''); setMemberOffset(0); }}>{club.total_atletas} integrantes</button>
+        <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={loading || busy} onClick={() => { setSelected(club); setMembers(null); setMembersLoading(true); setMemberError(''); setMemberQuery(''); setMemberOffset(0); }}>{club.total_atletas} integrantes</button>
           <button type="button" className={button} disabled={loading || busy} onClick={() => edit(club)}>Editar</button>
           <button type="button" className={button} disabled={loading || busy} onClick={() => void remove(club)}>Eliminar del directorio</button>
         </div>

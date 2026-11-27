@@ -1,8 +1,8 @@
 {
-  "version": "0.2.0-rc.4",
+  "version": "0.2.0-rc.5",
   "product": "ACTV",
   "kind": "source_candidate",
-  "sourceRef": "codex/actv-snapshots-operations",
+  "sourceRef": "codex/actv-linking-refunds-history",
   "productionQualified": false,
   "supported": [
     "legacy staff workflows",
@@ -15,7 +15,11 @@
     "shared server sale receipts",
     "server sales pause and original-order recovery",
     "immutable registration snapshots and manager-audited corrections",
-    "unified permission-based event operations workspace"
+    "unified permission-based event operations workspace",
+    "verified recipient-bound participant invitations",
+    "participant-scoped refund and durable recovery contracts",
+    "audited event cancellation and postponement",
+    "attendance observations and audited corrections retained independently of payment eligibility"
   ],
   "excluded": [
     "new merchandise storefront",
@@ -49,7 +53,12 @@
     "20261126012500_actv_registration_snapshots.sql",
     "20261126012600_actv_event_operations.sql",
     "20261126012700_actv_snapshot_receipts.sql",
-    "20261126012800_actv_club_operations.sql"
+    "20261126012800_actv_club_operations.sql",
+    "20261126012900_actv_participant_linking.sql",
+    "20261126013000_actv_participant_refunds.sql",
+    "20261126013100_actv_event_lifecycle.sql",
+    "20261126013200_actv_operations_lifecycle.sql",
+    "20261126013300_actv_adjusted_receipts.sql"
   ],
   "functions": [
     "actv-checkout",

@@ -53,26 +53,27 @@ const comprimirImagen = (file: File): Promise<File> => {
   });
 };
 
-export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<StaffScreenProps, 'eventos' | 'userRole' | 'userId'> & { eventId?: string }) {
+type KitProps = Pick<StaffScreenProps, 'eventos' | 'userRole' | 'userId'> & { eventId?: string };
+export default function TabEntregaKits(props: KitProps) {
+  const [chosenEvent, setChosenEvent] = useState('');
+  const selectedEvent = props.eventId || chosenEvent || props.eventos[0]?.id || '';
+  return <KitEventBody key={selectedEvent} {...props} selectedEvent={selectedEvent} onSelectEvent={setChosenEvent} />;
+}
+function KitEventBody({ eventos, userRole, eventId, selectedEvent, onSelectEvent }: KitProps & { selectedEvent: string; onSelectEvent: (id: string) => void }) {
   const isMounted = useClientReady();
 
   const [inscripciones, setInscripciones] = useState<Registration[]>([]);
   const [busqueda, setBusqueda] = useState('');
-  const [filtroEvento, setFiltroEvento] = useState('');
   const [cargando, setCargando] = useState(true);
   const [totalRegistros, setTotalRegistros] = useState(0);
   const [loadError, setLoadError] = useState('');
   const loadGeneration = React.useRef(0);
-  const selectedEvent = eventId || filtroEvento || eventos[0]?.id || '';
 
   const [vistaActual, setVistaActual] = useState<'pendientes' | 'entregados'>('pendientes');
 
   const [paginaActual, setPaginaActual] = useState(1);
   const itemsPorPagina = 25;
 
-  useEffect(() => {
-    setPaginaActual(1);
-  }, [busqueda, selectedEvent, vistaActual]);
 
   const [modalEntrega, setModalEntrega] = useState<Registration | null>(null);
   const [fotoArchivo, setFotoArchivo] = useState<File | null>(null);
@@ -80,10 +81,6 @@ export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<Staf
   const [procesando, setProcesando] = useState(false);
 
   const [modalEvidencia, setModalEvidencia] = useState<string | null>(null);
-  useEffect(() => {
-    setModalEntrega(null); setFotoArchivo(null); setFotoPreview(null); setModalEvidencia(null);
-    setInscripciones([]); setTotalRegistros(0); setCargando(true);
-  }, [selectedEvent]);
 
   type CleanupStatus = { policy: { approved_days: number | null }; queue: { evidence_id: string; state: string; attempts: number; last_error: string | null }[]; unmapped_legacy: number };
   const [cleanup, setCleanup] = useState<CleanupStatus | null>(null);
@@ -97,7 +94,14 @@ export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<Staf
     const { data, error } = await supabase.rpc('actv_evidence_cleanup_status');
     if (!error) setCleanup(data as CleanupStatus);
   }, [isManager]);
-  useEffect(() => { void loadCleanup(); }, [loadCleanup]);
+  useEffect(() => {
+    if (!isManager) return;
+    const abort = new AbortController();
+    void supabase.rpc('actv_evidence_cleanup_status').abortSignal(abort.signal).then(({ data, error }) => {
+      if (!abort.signal.aborted && !error) setCleanup(data as CleanupStatus);
+    });
+    return () => abort.abort();
+  }, [isManager]);
   const saveRetention = async (days: number | null) => {
     if (days !== null && (!Number.isInteger(days) || days < 1 || days > 3650)) return alert('Indica entre 1 y 3650 días.');
     setPolicyBusy(true);
@@ -147,7 +151,7 @@ export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<Staf
 
   const confirmarEntrega = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!modalEntrega || modalEntrega.actv_eligible === false || modalEntrega.monto_pagado === 'WP / Online') {
+    if (!modalEntrega || modalEntrega.entry_allowed !== true) {
       alert('Consulta conciliación antes de entregar este kit.');
       return;
     }
@@ -284,13 +288,13 @@ export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<Staf
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mt-6">
           <div className="flex bg-slate-100 p-1.5 rounded-xl w-full md:w-auto shadow-inner">
             <button
-              onClick={() => setVistaActual('pendientes')}
+              onClick={() => { setVistaActual('pendientes'); setPaginaActual(1); }}
               className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg text-sm font-bold transition-all duration-300 ${vistaActual === 'pendientes' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Kits Pendientes
             </button>
             <button
-              onClick={() => setVistaActual('entregados')}
+              onClick={() => { setVistaActual('entregados'); setPaginaActual(1); }}
               className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg text-sm font-bold transition-all duration-300 ${vistaActual === 'entregados' ? 'bg-white text-green-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Historial de Entregas
@@ -318,7 +322,7 @@ export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<Staf
               placeholder="Buscar por Folio (Ej. 080) o Nombre..."
               className="w-full bg-white border border-slate-200 p-3.5 pl-11 rounded-xl outline-none text-sm focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 text-slate-900 font-medium placeholder:font-normal placeholder:text-slate-400 shadow-sm transition-all"
               value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
+              onChange={(e) => { setBusqueda(e.target.value); setPaginaActual(1); }}
             />
           </div>
           <div className="w-full md:w-1/3 relative">
@@ -327,7 +331,7 @@ export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<Staf
               className="w-full bg-white border border-slate-200 p-3.5 pl-11 rounded-xl outline-none text-sm text-slate-900 font-bold shadow-sm appearance-none cursor-pointer focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
               value={selectedEvent}
               disabled={Boolean(eventId)}
-              onChange={(e) => setFiltroEvento(e.target.value)}
+              onChange={(e) => onSelectEvent(e.target.value)}
             >
               <option value="">Selecciona una carrera</option>
               {eventosDropdown.map((ev) => <option key={ev.id} value={ev.id}>{ev.nombre_carrera}</option>)}
@@ -351,7 +355,7 @@ export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<Staf
                   <span className="text-2xl font-black text-slate-800 tracking-tighter">{i.folio_asignado}</span>
                   {i.kit_entregado ? (
                     <span className="bg-green-100 text-green-700 text-[10px] font-black uppercase px-2.5 py-1 rounded border border-green-200 flex items-center tracking-widest"><CheckCircle className="w-3 h-3 mr-1"/> Entregado</span>
-                  ) : i.actv_eligible === false || i.monto_pagado === 'WP / Online' ? (
+                  ) : i.entry_allowed !== true ? (
                     <span className="bg-amber-100 text-amber-800 text-[10px] font-bold uppercase px-2.5 py-1 rounded border border-amber-200">Revisar pago</span>
                   ) : (
                     <span className="bg-amber-100 text-amber-700 text-[10px] font-black uppercase px-2.5 py-1 rounded border border-amber-200 tracking-widest">Pendiente</span>
@@ -373,7 +377,7 @@ export default function TabEntregaKits({ eventos, userRole, eventId }: Pick<Staf
 
                 <div className="pt-4 border-t border-slate-100">
                   {!i.kit_entregado ? (
-                    <button disabled={i.actv_eligible === false || i.monto_pagado === 'WP / Online'} onClick={() => setModalEntrega(i)} className="w-full py-3.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-black uppercase tracking-widest transition-all active:scale-95 shadow-md flex justify-center items-center disabled:opacity-45">
+                    <button disabled={i.entry_allowed !== true} onClick={() => setModalEntrega(i)} className="w-full py-3.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-black uppercase tracking-widest transition-all active:scale-95 shadow-md flex justify-center items-center disabled:opacity-45">
                       <Package className="w-4 h-4 mr-2"/> Entregar Kit
                     </button>
                   ) : (

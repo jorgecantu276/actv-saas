@@ -85,7 +85,8 @@ async function waitForRestSchema(context) {
   // installed contracts before testing them; never retry a write or reinterpret
   // PGRST202 as an authorization denial.
   const required = ['actv_evidence_adopt_legacy', 'actv_sale_receipt', 'actv_staff_recent_orders',
-    'actv_registration_record', 'actv_correct_registration', 'actv_operations_roster', 'actv_operations_clubs'];
+    'actv_registration_record', 'actv_correct_registration', 'actv_operations_roster', 'actv_operations_clubs',
+    'actv_my_participant_links','actv_participant_refund_detail','actv_transition_event','actv_correct_attendance'];
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     const response = await fetch(context.apiUrl + '/rest/v1/', { headers: {
@@ -307,6 +308,9 @@ export async function runFullStaging() {
       ['registration_snapshots_and_corrections', '../tests/staging/registration-contracts.mjs', 'verifyRegistrationContracts'],
       ['unified_event_operations', '../tests/staging/operations-contracts.mjs', 'verifyOperationsContracts'],
       ['bounded_club_operations', '../tests/staging/club-contracts.mjs', 'verifyClubContracts'],
+      ['verified_participant_linking', '../tests/staging/linking-contracts.mjs', 'verifyLinkingContracts'],
+      ['participant_refunds', '../tests/staging/refund-contracts.mjs', 'verifyRefundContracts'],
+      ['event_cancellation_and_attendance_history', '../tests/staging/lifecycle-contracts.mjs', 'verifyLifecycleContracts'],
       ['browser_event_operations', '../tests/staging/operations-browser.mjs', 'verifyOperationsBrowser'],
     ]) {
       console.log('[full-staging] ' + name);

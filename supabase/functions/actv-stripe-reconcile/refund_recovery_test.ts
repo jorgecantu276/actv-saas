@@ -95,6 +95,8 @@ async function execute(options: {
       case 'actv_finish_stripe_event_retry':
         eventFinishes.push(await req.json());
         return Response.json(options.webhook?.acknowledged);
+      case 'actv_pending_participant_refunds':
+        return Response.json([]);
       case 'actv_claim_refund_recovery':
         assertEquals(await req.json(), { p_live_mode: false, p_limit: options.webhook?.limit ?? 10 });
         return Response.json([{ ...request, provider_refund_id: options.providerRefundId ?? null }]);

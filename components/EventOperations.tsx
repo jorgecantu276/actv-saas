@@ -44,7 +44,22 @@ export default function EventOperations({initialEventId=''}:{initialEventId?:str
   const [eventId,setEventId]=useState(initialEventId),[event,setEvent]=useState<OperationsEvent|null>(null),[events,setEvents]=useState<Page<OperationsEvent>>({rows:[],total:0});
   const [query,setQuery]=useState(''),[offset,setOffset]=useState(0),[revision,setRevision]=useState(0),[tab,setTab]=useState('roster'),[loading,setLoading]=useState(true),[creating,setCreating]=useState(false);
   const reload=useCallback(()=>setRevision(v=>v+1),[]);
-  useEffect(()=>{let active=true;void supabase.auth.getSession().then(({data})=>{if(active)setSession(data.session);});const {data}=supabase.auth.onAuthStateChange((_event,current)=>{if(active){setSession(current);setContext(null);setEvent(null);}});return()=>{active=false;data.subscription.unsubscribe();};},[]);
+  useEffect(()=>{
+    let active=true,authEvents=0;
+    let identity:string|null|undefined;
+    function publish(current:Session|null){
+      if(!active)return;
+      const nextIdentity=current?current.user.id+':'+(current.user.email??''):null;
+      // Refreshing the same account must preserve an operator's open detail,
+      // draft and recovery request. Every session update still reloads authority.
+      if(identity!==nextIdentity){setContext(null);setEvent(null);}
+      identity=nextIdentity;setSession(current?{...current}:null);
+    }
+    const {data}=supabase.auth.onAuthStateChange((_event,current)=>{authEvents++;publish(current);});
+    const initialEvents=authEvents;
+    void supabase.auth.getSession().then(({data})=>{if(authEvents===initialEvents)publish(data.session);});
+    return()=>{active=false;data.subscription.unsubscribe();};
+  },[]);
   useEffect(()=>{if(!session)return;const controller=new AbortController();void supabase.rpc('actv_operations_context').abortSignal(controller.signal).then(({data,error})=>{if(controller.signal.aborted)return;setContext(error?null:data as Context);setError(error?.message??'');});return()=>controller.abort();},[session,revision,tab]);
   useEffect(()=>{if(!session)return;const controller=new AbortController();const timer=setTimeout(()=>{setLoading(true);void supabase.rpc('actv_operations_events',{p_query:query,p_offset:offset,p_limit:20}).abortSignal(controller.signal).then(({data,error})=>{if(controller.signal.aborted)return;setEvents(error?{rows:[],total:0}:data as Page<OperationsEvent>);setError(error?.message??'');setLoading(false);});},180);return()=>{clearTimeout(timer);controller.abort();};},[session,query,offset,revision]);
   useEffect(()=>{if(!session||!eventId){return;}const controller=new AbortController();void supabase.rpc('actv_operations_event',{p_event_id:eventId}).abortSignal(controller.signal).then(({data,error})=>{if(controller.signal.aborted)return;setEvent(error?null:data as OperationsEvent);setError(error?.message??'');});return()=>controller.abort();},[session,eventId,revision]);

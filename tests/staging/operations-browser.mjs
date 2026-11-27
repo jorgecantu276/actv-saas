@@ -11,6 +11,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { chromium } from 'playwright';
+import { verifyLinkingBrowser } from './linking-browser.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const delay = milliseconds => new Promise(done => setTimeout(done, milliseconds));
@@ -99,7 +100,7 @@ export async function verifyOperationsBrowser(context) {
   };
   let server, browser;
   try {
-    const manager = await identity('manager'), cashier = await identity('cashier'), organizer = await identity();
+    const manager = await identity('manager'), cashier = await identity('cashier'), organizer = await identity(), recipient = await identity();
     const organization = await rpc(organizer.client, 'actv_organizer_signup', { p_name: 'Synthetic browser organizer' });
     const race = randomUUID(), athlete = randomUUID();
     const raceName = 'Synthetic browser operations ' + race.slice(0, 8);
@@ -148,6 +149,29 @@ export async function verifyOperationsBrowser(context) {
     }
     browser = await chromium.launch({ headless: true });
     const browserVersion = browser.version();
+    // Next dev recompiles shared client modules on the first public-route visit.
+    // Finish those anonymous compilations before opening any staff draft/modal;
+    // production builds serve precompiled routes and do not run this HMR path.
+    console.info('ACTV browser phase: anonymous public route warming');
+    const warming = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      await warming.route('**/*', route => {
+        const url = new URL(route.request().url());
+        if (['data:', 'blob:'].includes(url.protocol)) return route.continue();
+        if (![appOrigin, new URL(apiUrl).origin].includes(url.origin)) {
+          blockedExternal++;
+          if (/stripe|mercadopago|facebook|actv\.mx/i.test(url.hostname)) externalProviderRequests++;
+          return route.abort('blockedbyclient');
+        }
+        browserRequests++;
+        return route.continue();
+      });
+      const warmPage = await warming.newPage();
+      for (const path of ['/organizadores', '/mi-actv']) {
+        const response = await warmPage.goto(appOrigin + path, { waitUntil: 'networkidle', timeout: 90000 });
+        assert(response?.ok(), 'Owned anonymous public route must finish compiling');
+      }
+    } finally { await warming.close(); }
     const contexts = [];
     const open = async (user, viewport, expectedName = 'Browser Original Participant') => {
       const isolated = await browser.newContext({ viewport, serviceWorkers: 'block' });
@@ -189,7 +213,10 @@ export async function verifyOperationsBrowser(context) {
     equal((await db.query('select revision from actv_payments.registration_snapshots where registration_id=$1', [registration.id])).rows[0].revision, 1);
     equal((await db.query('select original from actv_payments.registration_snapshots where registration_id=$1', [registration.id])).rows[0].original.participant.nombre, 'Browser Original');
     equal((await db.query('select effective from actv_payments.registration_snapshots where registration_id=$1', [registration.id])).rows[0].effective.participant.nombre, 'Browser Corrected');
-    await managerPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click();
+    console.info('ACTV browser phase: original manager correction detail close');
+    await managerPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click().catch(() => {
+      throw new Error('ACTV operations browser phase failed: original manager correction detail close');
+    });
     const row = managerPage.getByRole('row').filter({ hasText: 'Browser Corrected Participant' });
     await row.waitFor(); await row.getByRole('button', { name: 'Recibo', exact: true }).click();
     const receipt = managerPage.getByRole('dialog', { name: 'Recibo de inscripción', exact: true });
@@ -212,7 +239,10 @@ export async function verifyOperationsBrowser(context) {
     const staffDetail = staffPage.getByRole('region', { name: 'Datos e historial de inscripción', exact: true });
     await staffDetail.getByText('Revisión 1 · Datos conservados al aceptar la orden', { exact: true }).waitFor();
     equal(await staffDetail.getByRole('button', { name: 'Corregir datos con motivo', exact: true }).count(), 0);
-    await staffPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click();
+    console.info('ACTV browser phase: original cashier detail close');
+    await staffPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click().catch(() => {
+      throw new Error('ACTV operations browser phase failed: original cashier detail close');
+    });
     await staffPage.screenshot({ path: join(root, '.verification/operations-tablet.png'), fullPage: true });
     const organizerPage = await open(organizer, { width: 1280, height: 900 }, 'Browser Corrected Participant');
     await organizerPage.getByRole('row').filter({ hasText: 'Browser Corrected Participant' }).waitFor();
@@ -221,6 +251,8 @@ export async function verifyOperationsBrowser(context) {
     equal(await organizerPage.getByRole('button', { name: 'Clubes', exact: true }).count(), 0);
     equal(await organizerPage.getByRole('button', { name: 'Recibo', exact: true }).count(), 0);
     check(await organizerPage.getByRole('button', { name: 'Configuración', exact: true }).isVisible());
+    console.info('ACTV browser phase: linking helper start');
+    const linking = await verifyLinkingBrowser({ managerPage, browser, appOrigin, apiUrl, manager, recipient, db, rpc });
     await db.query('update actv_payments.staff set active=false where user_id=$1', [cashier.id]);
     await staffPage.reload({ waitUntil: 'domcontentloaded' });
     await staffPage.getByRole('button', { name: 'Cerrar sesión', exact: true }).waitFor();
@@ -233,7 +265,7 @@ export async function verifyOperationsBrowser(context) {
     restoreNextEnv();
     if (productionBuild !== null) equal(readFileSync(buildFile, 'utf8'), productionBuild);
     equal(readFileSync(join(root, 'tsconfig.json'), 'utf8'), rootTypeScriptConfig);
-    return { assertions, browserVersion, actualBrowserAuthAndPostgrest: true, isolatedTemporaryBrowserContexts: true,
+    return { assertions, linking, browserVersion, actualBrowserAuthAndPostgrest: true, isolatedTemporaryBrowserContexts: true, publicRoutesWarmedAnonymously: true,
       managerCorrectionAndReceipt: true, staffAndOrganizerBoundaries: true, activeRevocation: true,
       externalRequests: blockedExternal, externalProviderRequests, fontMode: 'synthetic_local_system_fallback',
       screenshots: ['operations-desktop.png', 'operations-tablet.png'].map(path => ({ path,

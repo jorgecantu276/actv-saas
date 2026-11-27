@@ -11,8 +11,10 @@ export default function SaleReceipt({ receipt, reprint = true, onClose }: {
 }) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const historical = receipt.payment_status !== 'confirmed';
-  const title = historical ? 'COPIA HISTÓRICA · PAGO SIN VALIDAR' : reprint ? 'REIMPRESIÓN' : 'PAGO CONFIRMADO';
+  const historical = receipt.payment_status === 'payment_unverified';
+  const adjusted = receipt.payment_status === 'adjusted';
+  const title = historical ? 'COPIA HISTÓRICA · PAGO SIN VALIDAR' : adjusted ? 'COMPROBANTE ORIGINAL · CON AJUSTES' : reprint ? 'REIMPRESIÓN' : 'PAGO CONFIRMADO';
+  const adjustments = adjusted ? `Devuelto: $${((receipt.refunded_minor ?? 0) / 100).toFixed(2)} MXN · Pendiente: $${((receipt.pending_minor ?? 0) / 100).toFixed(2)} MXN · Neto: $${((receipt.net_minor ?? 0) / 100).toFixed(2)} MXN` : '';
   const folios = receipt.participants.map(row => row.folio).join(', ');
   const requestPrint = async () => {
     setBusy(true);
@@ -29,7 +31,7 @@ export default function SaleReceipt({ receipt, reprint = true, onClose }: {
     finally { setBusy(false); }
   };
   const share = () => {
-    const text = `${title}\n${receipt.event_name}\n${receipt.participants.map(p => `${[p.name, p.surname].filter(Boolean).join(' ') || 'Nombre no registrado'}: ${p.folio}`).join('\n')}\n${receiptAmount(receipt)}\nRecibo: ${receipt.receipt_id}`;
+    const text = `${title}\n${receipt.event_name}\n${receipt.participants.map(p => `${[p.name, p.surname].filter(Boolean).join(' ') || 'Nombre no registrado'}: ${p.folio}${p.entry_allowed === false ? ' · ACCESO NO VIGENTE' : ''}`).join('\n')}\n${receiptAmount(receipt)}\n${adjustments}\nEvento: ${receipt.event_status ?? 'Consultar ACTV'}\nRecibo: ${receipt.receipt_id}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
   return createPortal(<>
@@ -52,6 +54,8 @@ export default function SaleReceipt({ receipt, reprint = true, onClose }: {
         <p className="my-4 text-2xl font-black">{folios}</p>
         {receipt.participants.map(row => <p key={row.registration_id}>{[row.name, row.surname].filter(Boolean).join(' ') || 'Nombre no registrado'} · {row.package}{row.revision > 0 && ` · Corrección rev. ${row.revision}`}</p>)}
         <p className="my-3 font-bold">{receiptAmount(receipt)}</p>
+        {adjusted && <p>{adjustments}<br />Evento: {receipt.event_status}. El cobro original no acredita vigencia de acceso.</p>}
+        {receipt.participants.filter(row => row.entry_allowed === false).map(row => <p key={row.registration_id}>Folio {row.folio}: acceso no vigente.</p>)}
         <p className="break-all text-xs">Recibo: {receipt.receipt_id}</p>
         {historical && <p className="my-2">La inscripción histórica conserva su folio. ACTV no tiene una captura que confirme este pago.</p>}
         <div className="mt-4 flex flex-wrap gap-2">
@@ -74,11 +78,13 @@ export default function SaleReceipt({ receipt, reprint = true, onClose }: {
         {receipt.participants.map(row => <div key={row.registration_id} style={{ borderTop: '1px dashed black' }}>
           <p><strong>FOLIO: {row.folio}</strong><br />{[row.name, row.surname].filter(Boolean).join(' ') || 'Nombre no registrado'}<br />{row.package ?? 'Paquete no registrado'}</p>
           {row.revision > 0 && <p>Datos corregidos · revisión {row.revision}</p>}
+          {row.entry_allowed === false && <p><strong>ACCESO NO VIGENTE</strong>{row.refunded_minor ? ' · Participante reembolsado' : ' · Consulta operaciones'}</p>}
           {row.provenance !== 'accepted_order' && <p style={{ fontSize: '8pt' }}>Datos históricos observados; aceptación original incompleta.</p>}
           <p>Talla: {row.shirt_size ?? '—'} · Club: {row.club ?? '—'}</p>
           <div style={{ textAlign: 'center' }}><QRCode value={row.folio} size={100} /></div>
         </div>)}
         <p>{historical ? 'IMPORTE HISTÓRICO:' : 'PAGO TOTAL:'} {receiptAmount(receipt)}</p>
+        {adjusted && <p>{adjustments}<br />Evento: {receipt.event_status}<br />El comprobante conserva el cobro original; consulta la vigencia de cada participante.</p>}
         <p>Método: {receipt.channel ?? 'Desconocido'}<br />Cajero: {receipt.cashier_name ?? (receipt.cashier_id ? receipt.cashier_id : 'No registrado')}</p>
         <p style={{ fontSize: '8pt' }}>Consulta recibos fiscales y aclaraciones con ACTV. actv.mx</p>
         {copy === 'ORGANIZADOR' && <p style={{ marginTop: '10mm' }}>____________________<br />Firma de recepción</p>}

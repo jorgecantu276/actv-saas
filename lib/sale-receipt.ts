@@ -7,7 +7,12 @@ export interface SaleReceipt {
   event_name: string;
   event_date: string | null;
   issued_at: string | null;
-  payment_status: 'confirmed' | 'payment_unverified';
+  payment_status: 'confirmed' | 'adjusted' | 'payment_unverified';
+  refunded_minor?: number;
+  pending_minor?: number;
+  net_minor?: number;
+  financial_hold?: boolean;
+  event_status?: string;
   amount_minor: number | null;
   recorded_amount?: string | number | null;
   currency: string;
@@ -17,7 +22,7 @@ export interface SaleReceipt {
   participants: { registration_id: string; athlete_id: string | null; folio: string;
     package: string | null; amount_minor: number | null; name: string | null; surname: string | null;
     phone: string | null; shirt_size: string | null; club: string | null;
-    revision: number; provenance: string }[];
+    revision: number; provenance: string; entry_allowed?: boolean; refunded_minor?: number }[];
 }
 
 export type ReceiptIdentity = { p_order_id: string } | { p_registration_id: string }
@@ -33,7 +38,7 @@ export async function loadSaleReceipt(identity: ReceiptIdentity): Promise<SaleRe
 }
 
 export function receiptAmount(receipt: SaleReceipt) {
-  return receipt.payment_status === 'confirmed' && receipt.amount_minor !== null
+  return receipt.payment_status !== 'payment_unverified' && receipt.amount_minor !== null
     ? `$${(receipt.amount_minor / 100).toFixed(2)} MXN`
     : `${receipt.recorded_amount ?? 'Desconocido'} MXN (importe histórico sin validar)`;
 }

@@ -86,7 +86,9 @@ export async function verifyReceiptContracts(context, retained) {
     await rpc(manager.client, 'actv_set_staff_access', access(cashier, [race], false));
     await deny(cashier.client, { p_order_id: order.order_id });
     await db.query("update actv_payments.orders set state='review' where id=$1", [order.order_id]);
-    await deny(manager.client, { p_order_id: order.order_id });
+    const adjusted=await rpc(manager.client,'actv_sale_receipt',{p_order_id:order.order_id});
+    eq(adjusted.payment_status,'adjusted');eq(adjusted.amount_minor,receipt.amount_minor);
+    eq(adjusted.participants.map(row=>row.folio),receipt.participants.map(row=>row.folio));
     eq((await db.query('select count(*)::int as n from actv_payments.captures where order_id=$1', [order.order_id])).rows[0].n, 1);
     return { assertions, actualAuthAndPostgrest: true, authoritativeWholeOrder: true,
       eventScopedFolioLookup: true, sameIdentityReprint: true, unknownLegacyPaymentPreserved: true,

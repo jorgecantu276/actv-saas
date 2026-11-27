@@ -147,6 +147,12 @@
       "scope": "source_candidate_registration_snapshots_and_operations",
       "reference": "docs/registration-operations.md; CI artifact .verification/full-staging.json at the tested revision",
       "supports": "Immutable all-channel order-time participant/package/event/consent snapshots, revision/idempotency-protected corrections, snapshot receipts/kits/rosters and permission-based event operations. No approved legal policy, personal ownership, hosted/device or whole-release qualification is inferred."
+    },
+    {
+      "id": "E13",
+      "scope": "source_contracts_synthetic_only",
+      "reference": "docs/linking-refunds-history.md; exact-source CI artifacts",
+      "supports": "Recipient-bound invitations; original-item refund reservations and recovery; event cancellation preserving financial obligations and attendance; audited attendance corrections. Does not close hosted/device/legal/operator acceptance."
     }
   ],
   "benchmark_method": {
@@ -899,10 +905,10 @@
     }
   ],
   "source_consolidation": {
-    "version": "0.2.0-rc.4",
-    "ref": "codex/actv-snapshots-operations",
+    "version": "0.2.0-rc.5",
+    "ref": "codex/actv-linking-refunds-history",
     "manifest": "ops/source-candidate.json",
     "verification_command": "npm run verify",
-    "scope": "Source candidate with order-time registration/consent snapshots, audited corrections and a unified event operations workspace with bounded scoped reads. Hosted, policy, device, operator and cutover acceptance remain unqualified."
+    "scope": "Source candidate with verified participant linking, selected refund and recovery flows, event lifecycle and independent audited attendance history. Hosted, policy, device, operator and cutover acceptance remain unqualified."
   }
 }

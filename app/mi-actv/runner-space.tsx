@@ -5,13 +5,14 @@ import type { Session } from '@supabase/supabase-js';
 import Link from 'next/link';
 import {
   ArrowRight, ArrowUpRight, Check, CheckCircle2, Clipboard,
-  Flag, LogOut, RefreshCw, Share2, UserCheck,
+  Flag, LogOut, RefreshCw, Share2,
 } from 'lucide-react';
 import { AccountEntry } from '@/app/_pagos/account-entry';
 import { supabase } from '@/lib/supabase';
 import { attendanceMilestones, runnerHistory, type Registration } from './runner-history';
 import { actvDisplay } from '@/app/_pagos/public-type';
 import styles from './runner-space.module.css';
+import ParticipantLinkRedeemer, { ParticipantInvitationInbox } from './participant-link';
 
 type RunnerDashboard = { registrations: Registration[] };
 
@@ -84,7 +85,7 @@ function RunnerHistory({ email }: { email?: string }) {
   const [dashboard, setDashboard] = useState<RunnerDashboard>();
   const [error, setError] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const [claimingEvent, setClaimingEvent] = useState('');
+
   const today = localDay.format(new Date());
 
   useEffect(() => {
@@ -108,26 +109,13 @@ function RunnerHistory({ email }: { email?: string }) {
     setRefresh((value) => value + 1);
   };
   const registrations = dashboard?.registrations ?? [];
-  const ownEvents = new Set(registrations.filter((race) => race.personal).map((race) => race.event_id));
+
   const history = runnerHistory(registrations, today);
   const { upcoming, otherPast } = history;
 
   function rows(items: Registration[]) {
     return <ul className={styles.raceList}>
       {items.map((item) => <RaceRow key={item.event_id + ':' + item.folio} race={item} today={today}
-        canClaim={!ownEvents.has(item.event_id) && !claimingEvent}
-        onClaimStart={() => setClaimingEvent(item.event_id)}
-        onClaimComplete={(claimed) => {
-          if (claimed) {
-            setDashboard((current) => current && ({
-              ...current,
-              registrations: current.registrations.map((race) =>
-                race.event_id === item.event_id ? { ...race, personal: race.folio === item.folio } : race),
-            }));
-          }
-          setClaimingEvent('');
-          setRefresh((value) => value + 1);
-        }}
         onShareChange={(slug) => {
           setDashboard((current) => current && ({
             ...current,
@@ -138,7 +126,7 @@ function RunnerHistory({ email }: { email?: string }) {
     </ul>;
   }
 
-  return <div className={styles.history}>
+  return <div className={styles.history}><ParticipantLinkRedeemer onLinked={retry}/><ParticipantInvitationInbox onLinked={retry}/>
     <section className={styles.passportHero} aria-labelledby="runner-title">
       <div className={styles.heroCopy}>
         <p className={styles.eyebrow}>Mi ACTV / Pasaporte de corredor</p>
@@ -233,15 +221,12 @@ function RunnerHistory({ email }: { email?: string }) {
   </div>;
 }
 
-function RaceRow({ race, today, canClaim, onClaimStart, onClaimComplete, onShareChange }: {
+function RaceRow({ race, today, onShareChange }: {
   race: Registration;
   today: string;
-  canClaim: boolean;
-  onClaimStart: () => void;
-  onClaimComplete: (claimed: boolean) => void;
   onShareChange: (slug: string | null) => void;
 }) {
-  const [action, setAction] = useState<'claim' | 'publish' | 'revoke' | null>(null);
+  const [action, setAction] = useState<'publish' | 'revoke' | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
   const [copyMessage, setCopyMessage] = useState('');
@@ -263,18 +248,14 @@ function RaceRow({ race, today, canClaim, onClaimStart, onClaimComplete, onShare
   }
 
   async function applyAction() {
-    if (!action || working || (action === 'claim' && !canClaim)) return;
+    if (!action || working) return;
     setWorking(true);
     setError('');
     const args = { p_event_id: race.event_id, p_folio: race.folio };
-    let claimed = false;
-    if (action === 'claim') onClaimStart();
+
+
     try {
-      if (action === 'claim') {
-        const { data, error: claimError } = await supabase.rpc('actv_claim_runner_folio', args);
-        if (claimError || data !== true) throw claimError ?? new Error('Folio unavailable');
-        claimed = true;
-      } else if (action === 'publish') {
+      if (action === 'publish') {
         const { data: slug, error: publishError } = await supabase.rpc('actv_publish_achievement', args);
         if (publishError || typeof slug !== 'string' || !achievementPath(slug)) {
           throw publishError ?? new Error('Invalid share link');
@@ -288,12 +269,11 @@ function RaceRow({ race, today, canClaim, onClaimStart, onClaimComplete, onShare
       setAction(null);
     } catch {
       setError({
-        claim: 'No pudimos marcar el folio como tuyo. Puede que ya hayas elegido otro para esta carrera.',
         publish: 'No pudimos crear el enlace. Inténtalo de nuevo.',
         revoke: 'No pudimos desactivar el enlace. Inténtalo de nuevo.',
       }[action]);
     } finally {
-      if (action === 'claim') onClaimComplete(claimed);
+
       setWorking(false);
     }
   }
@@ -306,30 +286,28 @@ function RaceRow({ race, today, canClaim, onClaimStart, onClaimComplete, onShare
           <span aria-hidden="true"> · </span><span>Folio <strong className={styles.folio}>{race.folio}</strong></span></p>
         <p className={styles.raceStatus} data-attended={race.attended}>
           {race.attended && <CheckCircle2 size={15} aria-hidden="true" />}
-          {race.attended ? 'Asistencia confirmada' : upcoming ? 'Inscripción confirmada' : 'Asistencia sin confirmar'}
+          {race.attended ? 'Asistencia confirmada' : race.event_status === 'cancelled' ? 'Carrera cancelada' : race.entry_allowed === false ? 'Inscripción no vigente; consulta al organizador' : race.event_status === 'postponed' ? 'Carrera aplazada; revisa la fecha vigente' : upcoming ? 'Inscripción vigente' : 'Asistencia sin confirmar'}
           {race.personal && <span className={styles.ownFolio}>Mi folio</span>}
         </p>
+        {race.event_notice && <p>{race.event_notice}</p>}
         {copyMessage && <p role="status">{copyMessage}</p>}
       </div>
       {upcoming && race.personal && <button type="button" className={styles.secondary} onClick={() => void copyFolio()}>
         <Clipboard size={16} aria-hidden="true" /> Copiar folio
       </button>}
-      {canClaim && !action && <button type="button" className={styles.secondary} onClick={() => choose('claim')}>
-        <UserCheck size={16} aria-hidden="true" /> Marcar como mi folio
-      </button>}
+
       {race.personal && race.attended && !path && !action && <button type="button" className={styles.secondary} onClick={() => choose('publish')}>
         <Share2 size={16} aria-hidden="true" /> Compartir asistencia
       </button>}
     </div>
     {action && <div className={styles.sharePanel}>
       <p>{{
-        claim: 'Elige el folio con el que tú corres. Puedes marcar un solo folio por carrera.',
         publish: 'Cualquiera con el enlace podrá ver la carrera, la fecha y que asististe. Puedes desactivarlo después.',
         revoke: 'El enlace dejará de mostrar tu asistencia aunque alguien ya lo haya guardado.',
       }[action]}</p>
       <div className={styles.shareActions}>
-        <button type="button" disabled={working || (action === 'claim' && !canClaim)} className={styles.primary} onClick={() => void applyAction()}>
-          {working ? 'Guardando…' : { claim: 'Confirmar mi folio', publish: 'Crear enlace público', revoke: 'Desactivar enlace' }[action]}
+        <button type="button" disabled={working} className={styles.primary} onClick={() => void applyAction()}>
+          {working ? 'Guardando…' : { publish: 'Crear enlace público', revoke: 'Desactivar enlace' }[action]}
         </button>
         <button type="button" disabled={working} className={styles.textButton} onClick={() => choose(null)}>Cancelar</button>
       </div>

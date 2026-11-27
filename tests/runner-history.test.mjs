@@ -34,3 +34,15 @@ test('empty and completed passports have truthful milestone states', () => {
   assert.equal(history.count, 10);
   assert.equal(history.nextMilestone, null);
 });
+
+test('cancellation and refunds preserve earned attendance without advertising an unusable entry', () => {
+  const history = runnerHistory([
+    registration({personal: true, attended: true, entry_allowed: false, event_status: 'cancelled'}),
+    registration({event_id: 'cancelled-future', event_date: '2027-01-01', event_status: 'cancelled', entry_allowed: false}),
+    registration({event_id: 'refunded-future', event_date: '2027-01-02', entry_allowed: false}),
+    registration({event_id: 'active-future', event_date: '2027-01-03', entry_allowed: true}),
+  ], '2026-11-26');
+  assert.equal(history.count, 1);
+  assert.deepEqual(history.upcoming.map(race => race.event_id), ['active-future']);
+  assert.deepEqual(new Set(history.otherPast.map(race => race.event_id)), new Set(['cancelled-future', 'refunded-future']));
+});
