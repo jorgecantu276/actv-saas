@@ -1,0 +1,9 @@
+{
+  "format": "actv-release-identity-v1",
+  "sourceSha": null,
+  "sourceTree": null,
+  "releaseId": null,
+  "environment": "development",
+  "targetSha256": null,
+  "productionQualified": false
+}

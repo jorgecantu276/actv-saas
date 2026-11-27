@@ -1,0 +1,16 @@
+{
+  "format": "actv-release-target-v1",
+  "environment": "production",
+  "origin": "https://pdv.actv.mx",
+  "supabaseProjectRef": "ndjqyootqtnygyzhbjrz",
+  "productionProjectRef": "ndjqyootqtnygyzhbjrz",
+  "stripeMode": "live",
+  "nodeMajor": 24,
+  "syntheticOnly": false,
+  "configuration": {
+    "publicRaceMode": "live",
+    "wordpressOrigin": "https://actv.mx",
+    "supabaseAnonKeySha256": "0c8d2c74fb74d087d77f6c0da364ef59d64d4435da7a5fbc3686df3d6d109d7c",
+    "staffOrigin": "https://pdv.actv.mx"
+  }
+}

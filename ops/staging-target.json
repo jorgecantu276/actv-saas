@@ -1,0 +1,16 @@
+{
+  "format": "actv-release-target-v1",
+  "environment": "staging",
+  "origin": "https://staging-pdv.actv.mx",
+  "supabaseProjectRef": "fwbvbppwixzbearrlsza",
+  "productionProjectRef": "ndjqyootqtnygyzhbjrz",
+  "stripeMode": "test",
+  "nodeMajor": 24,
+  "syntheticOnly": true,
+  "configuration": {
+    "publicRaceMode": "test",
+    "wordpressOrigin": "https://actv.mx",
+    "supabaseAnonKeySha256": "db00f2e0ad6e5302c0f501030d6e4a45b319a0d14581455ce4f539a0dabb083d",
+    "staffOrigin": "https://staging-pdv.actv.mx"
+  }
+}

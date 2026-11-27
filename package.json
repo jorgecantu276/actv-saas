@@ -10,7 +10,7 @@
     "test:payments:staging": "node tests/staging-payments.mjs",
     "verify": "node scripts/verify.mjs",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --test ops/tests/status.test.mjs tests/runner-history.test.mjs tests/legacy-store.test.mjs tests/candidate-composition.test.mjs tests/staff-provisioning.test.mjs tests/staging-bindings.test.mjs",
+    "test:unit": "node --test ops/tests/status.test.mjs tests/runner-history.test.mjs tests/legacy-store.test.mjs tests/candidate-composition.test.mjs tests/staff-provisioning.test.mjs tests/staging-bindings.test.mjs tests/release-delivery.test.mjs",
     "test:staging:full": "node scripts/full-staging.mjs"
   },
   "dependencies": {

@@ -27,3 +27,14 @@ The `ACTV product record` workflow validates this record/tool only. The separate
 ## Supported source verification
 
 The consolidated source uses npm run verify and ops/source-candidate.json. This creates a fresh synthetic container for each run and records source-only evidence under ignored .verification/. Never run staging SQL against retained/hosted data. Full operational schema and W6/W7 acceptance remain open. See docs/consolidation.md.
+
+## Release delivery
+
+`ACTV release delivery` automatically stages successful exact main-push
+verification, rejecting PR/fork/failed or superseded triggers. Manual dispatch
+uses the same preparation/deployment path and public target bindings. Staging
+uses the enrolled synthetic backend and the existing hosting adapter.
+Production additionally requires environment approval and exact W6 evidence;
+database maintenance and W7 sales reopening remain separate. Read
+[release delivery](../docs/release-delivery.md) before dispatching. `/api/version`
+identifies the deployed source/tree/release and explicitly does not qualify it.
