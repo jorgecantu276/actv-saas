@@ -11,6 +11,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { chromium } from 'playwright';
+import { verifyLinkingBrowser } from './linking-browser.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const delay = milliseconds => new Promise(done => setTimeout(done, milliseconds));
@@ -99,7 +100,7 @@ export async function verifyOperationsBrowser(context) {
   };
   let server, browser;
   try {
-    const manager = await identity('manager'), cashier = await identity('cashier'), organizer = await identity();
+    const manager = await identity('manager'), cashier = await identity('cashier'), organizer = await identity(), recipient = await identity();
     const organization = await rpc(organizer.client, 'actv_organizer_signup', { p_name: 'Synthetic browser organizer' });
     const race = randomUUID(), athlete = randomUUID();
     const raceName = 'Synthetic browser operations ' + race.slice(0, 8);
@@ -221,6 +222,7 @@ export async function verifyOperationsBrowser(context) {
     equal(await organizerPage.getByRole('button', { name: 'Clubes', exact: true }).count(), 0);
     equal(await organizerPage.getByRole('button', { name: 'Recibo', exact: true }).count(), 0);
     check(await organizerPage.getByRole('button', { name: 'Configuración', exact: true }).isVisible());
+    const linking = await verifyLinkingBrowser({ managerPage, browser, appOrigin, apiUrl, manager, recipient, db, rpc });
     await db.query('update actv_payments.staff set active=false where user_id=$1', [cashier.id]);
     await staffPage.reload({ waitUntil: 'domcontentloaded' });
     await staffPage.getByRole('button', { name: 'Cerrar sesión', exact: true }).waitFor();
@@ -233,7 +235,7 @@ export async function verifyOperationsBrowser(context) {
     restoreNextEnv();
     if (productionBuild !== null) equal(readFileSync(buildFile, 'utf8'), productionBuild);
     equal(readFileSync(join(root, 'tsconfig.json'), 'utf8'), rootTypeScriptConfig);
-    return { assertions, browserVersion, actualBrowserAuthAndPostgrest: true, isolatedTemporaryBrowserContexts: true,
+    return { assertions, linking, browserVersion, actualBrowserAuthAndPostgrest: true, isolatedTemporaryBrowserContexts: true,
       managerCorrectionAndReceipt: true, staffAndOrganizerBoundaries: true, activeRevocation: true,
       externalRequests: blockedExternal, externalProviderRequests, fontMode: 'synthetic_local_system_fallback',
       screenshots: ['operations-desktop.png', 'operations-tablet.png'].map(path => ({ path,

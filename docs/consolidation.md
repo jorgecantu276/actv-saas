@@ -1,4 +1,6 @@
-Current follow-up: source candidate 0.2.0-rc.4 adds [registration snapshots, audited corrections and unified operations](registration-operations.md). Previous candidates added [private evidence, shared receipts and sales recovery](evidence-receipts-recovery.md) and the [complete staging baseline and staff lifecycle](staging-baseline.md). The record below describes the earlier 0.2.0-rc.1 consolidation.
+Current follow-up: [verified linking, refunds, event lifecycle and attendance history](linking-refunds-history.md).
+
+Current follow-up: source candidate 0.2.0-rc.5 adds [registration snapshots, audited corrections and unified operations](registration-operations.md). Previous candidates added [private evidence, shared receipts and sales recovery](evidence-receipts-recovery.md) and the [complete staging baseline and staff lifecycle](staging-baseline.md). The record below describes the earlier 0.2.0-rc.1 consolidation.
 
 # Consolidation of the November ACTV work
 

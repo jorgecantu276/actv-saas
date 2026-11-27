@@ -1,6 +1,7 @@
 import { body, env, handler, HttpError, liveMode, rpc } from '../_shared/http.ts';
 import type { Order } from '../_shared/orders.ts';
 import { claimRefundRecovery, noteRefundRecovery, recoverAdminRefund } from '../_shared/refund-recovery.ts';
+import { recoverParticipantRefunds } from '../_shared/participant-refunds.ts';
 import { acknowledgeEvent, applyEvent, type EventRetry, syncPendingOrder } from '../_shared/stripe-events.ts';
 import { type Stripe, stripeClient, stripeErrorCode } from '../_shared/stripe.ts';
 
@@ -100,6 +101,11 @@ export const reconciliationHandler = handler('actv-stripe-reconcile', async (req
         }),
       );
     }
+  }
+  if (hasTime()) {
+    const participant = await recoverParticipantRefunds(stripe, mode, limit, deadline);
+    result.refunds.attempted += participant.attempted;
+    result.refunds.failed += participant.failed;
   }
   return result;
 });

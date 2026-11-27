@@ -68,6 +68,7 @@ export interface Registration {
   paquete_comprado: string;
   monto_pagado: string;
   actv_eligible: boolean | null;
+  entry_allowed?: boolean;
   kit_entregado: boolean | null;
   foto_evidencia: string | null;
   asistencia?: boolean | null;

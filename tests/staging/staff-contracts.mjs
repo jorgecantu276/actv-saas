@@ -46,6 +46,14 @@ export async function seedLegacyState(context) {
   const athlete = randomUUID(), race = randomUUID(), otherRace = randomUUID(), registration = randomUUID();
   const evidenceAthlete = randomUUID(), evidenceRegistration = randomUUID(), evidenceReferenceRegistration = randomUUID();
   const orphanRegistration = randomUUID();
+  const linkingLegacyRegistration = randomUUID(), linkingLegacyRace = randomUUID();
+  const linkingUnpaidRegistration = randomUUID();
+  await db.query(`insert into public.eventos(id,nombre_carrera,fecha,organizador,distancia,precio_1,cupo_maximo)
+    values($1,'Synthetic unconfigured legacy linking',current_date+7,'ACTV','5K',500,10)`, [linkingLegacyRace]);
+  await db.query(`insert into public.inscripciones(id,evento_id,folio_asignado,monto_pagado,metodo_pago)
+    values($1,$2,'LEGACY-LINK',500,'efectivo')`, [linkingLegacyRegistration, linkingLegacyRace]);
+  await db.query(`insert into public.inscripciones(id,evento_id,folio_asignado,monto_pagado,metodo_pago)
+    values($1,$2,'LEGACY-UNPAID','WP / Online','online')`, [linkingUnpaidRegistration, linkingLegacyRace]);
   await db.query(`insert into public.eventos(id,nombre_carrera,fecha,organizador,distancia,precio_1,cupo_maximo)
     values($1,'Synthetic retained race',current_date+7,'ACTV','5K',500,10),
           ($2,'Synthetic other race',current_date+7,'ACTV','10K',500,10)`, [race, otherRace]);
@@ -75,7 +83,7 @@ export async function seedLegacyState(context) {
   const club = (await db.query("insert into public.clubes(nombre) values('Synthetic retained club') returning id")).rows[0].id;
   const snapshot = (await db.query(`select id,atleta_id,evento_id,folio_asignado,monto_pagado,metodo_pago,usuario_id,foto_evidencia
     from public.inscripciones where id=$1`, [registration])).rows[0];
-  return { manager, legacyStaff, race, otherRace, athlete, registration, evidenceRegistration, evidenceReferenceRegistration, orphanRegistration, client, service, quote, club, snapshot, objectPath, objectBytes };
+  return { manager, legacyStaff, race, otherRace, athlete, registration, evidenceRegistration, evidenceReferenceRegistration, orphanRegistration, linkingLegacyRegistration, linkingLegacyRace, linkingUnpaidRegistration, client, service, quote, club, snapshot, objectPath, objectBytes };
 }
 
 export async function verifyStaffLifecycle(context, retained) {

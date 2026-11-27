@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, ArrowRight, Mail, MoveUpRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { actvDisplay } from './public-type';
+import { useClientReady } from '@/lib/use-client-ready';
 import styles from './account-entry.module.css';
 
 const copy = {
@@ -32,26 +33,31 @@ function localMailbox() {
   return url?.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname) ? url.href : '';
 }
 
-export function AccountEntry({ audience, returnPath, linkFailed = false }: {
+type AccountEntryProps = {
   audience: keyof typeof copy;
   returnPath: string;
   linkFailed?: boolean;
-}) {
+};
+export function AccountEntry(props: AccountEntryProps) {
+  const ready = useClientReady();
+  return ready ? <AccountEntryBody key={[props.audience, props.returnPath, props.linkFailed].join(':')} {...props} /> : null;
+}
+function AccountEntryBody({ audience, returnPath, linkFailed = false }: AccountEntryProps) {
   const labels = copy[audience];
   const expiredMessage = 'Este enlace ya no está disponible. Pide uno nuevo.';
-  const [mode, setMode] = useState<Mode>(linkFailed ? 'login' : 'signup');
+  const [failedFragment] = useState(() => new URLSearchParams(window.location.hash.slice(1)).has('error_code'));
+  const failed = linkFailed || failedFragment;
+  const [mode, setMode] = useState<Mode>(failed ? 'login' : 'signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
   const [sentTo, setSentTo] = useState('');
-  const [error, setError] = useState(linkFailed ? expiredMessage : '');
+  const [error, setError] = useState(failed ? expiredMessage : '');
 
   useEffect(() => {
     const fragment = new URLSearchParams(window.location.hash.slice(1));
     if (fragment.has('error_code')) {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      setError(expiredMessage);
-      setMode('login');
     }
   }, []);
 

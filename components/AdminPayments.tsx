@@ -9,6 +9,7 @@ import {
 import { paymentFunction, PaymentsError } from '@/app/_pagos/api';
 import { supabase } from '@/lib/supabase';
 import styles from './AdminPayments.module.css';
+import ParticipantRefunds from './ParticipantRefunds';
 
 type Payment = {
   id: string;
@@ -593,6 +594,7 @@ function PaymentDetails({ selection, loading, close, sendRefund }: {
       {refundRequest.requested_by && ` por ${refundRequest.requested_by}`}.
       {' '}{refundRequest.refund_application_fee ? 'Incluye la devolución de la comisión de ACTV.' : 'Conserva la comisión de ACTV.'}
     </p>}
+    <ParticipantRefunds orderId={payment.id} />
     {canRequest && !confirming && <button type="button" className={styles.refundAction} disabled={loading} onClick={() => setConfirming(true)}>
       <ArrowDownLeft size={17} />{refundRequest ? 'Revisar reembolso' : 'Reembolsar pago'}
     </button>}

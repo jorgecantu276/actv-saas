@@ -1,4 +1,7 @@
 export type Registration = {
+  entry_allowed?: boolean;
+  event_status?: string;
+  event_notice?: string;
   event_id: string;
   event_name: string;
   event_date: string;
@@ -19,9 +22,9 @@ export function runnerHistory(registrations: Registration[], today: string) {
   const confirmed = registrations.filter((race) => race.personal && race.attended)
     .sort((a, b) => b.event_date.localeCompare(a.event_date));
   const attended = [...new Map(confirmed.map((race) => [race.event_id, race])).values()];
-  const upcoming = registrations.filter((race) => race.event_date >= today && !(race.personal && race.attended))
+  const upcoming = registrations.filter((race) => race.event_date >= today && race.entry_allowed !== false && race.event_status !== 'cancelled' && !(race.personal && race.attended))
     .sort((a, b) => a.event_date.localeCompare(b.event_date) || Number(b.personal) - Number(a.personal));
-  const otherPast = registrations.filter((race) => race.event_date < today && !(race.personal && race.attended))
+  const otherPast = registrations.filter((race) => (race.event_date < today || race.entry_allowed === false || race.event_status === 'cancelled') && !(race.personal && race.attended))
     .sort((a, b) => b.event_date.localeCompare(a.event_date) || Number(b.personal) - Number(a.personal));
   return {
     attended,

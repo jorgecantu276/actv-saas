@@ -1,5 +1,6 @@
 import { body, field, handler, HttpError, liveMode, operator, rpc, uuid } from '../_shared/http.ts';
 import { verifyAdminRefund } from '../_shared/refund-recovery.ts';
+import { executeParticipantRefund, type ParticipantRefund } from '../_shared/participant-refunds.ts';
 import { objectId, Stripe, stripeClient, stripeOptions } from '../_shared/stripe.ts';
 
 type RefundReason = 'requested_by_customer' | 'duplicate';
@@ -165,6 +166,16 @@ export const adminPaymentsHandler = handler('actv-admin-payments', async (reques
   const actor = await operator(request);
   const mode = liveMode();
   const input = await body(request);
+  if (input.action === 'participant-refund') {
+    if (input.confirmed !== true || !Array.isArray(input.itemIds) || input.itemIds.length < 1 || input.itemIds.length > 20 ||
+      typeof input.refundCommission !== 'boolean' || typeof input.participantScoped !== 'boolean') throw new HttpError(400, 'invalid_request');
+    const row = await rpc<ParticipantRefund>('actv_begin_participant_refund', {
+      p_operator: actor, p_live_mode: mode, p_order: uuid(input.orderId), p_request: uuid(input.requestId),
+      p_items: input.itemIds.map((id) => uuid(id)), p_reason: field(input.reason, 500),
+      p_refund_application_fee: input.refundCommission, p_participant_scoped: input.participantScoped,
+    });
+    return await executeParticipantRefund(stripeClient(), row, mode);
+  }
   if (input.action === 'list' || input.action === 'outflows') {
     const from = field(input.from, 10);
     const to = field(input.to, 10);

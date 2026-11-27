@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { supabase } from '../lib/supabase';
 import RegistrationConsentFields from './RegistrationConsentFields';
 import { consentFor, type RegistrationConsent, type RegistrationPolicy } from '../lib/registration-contract';
+import { useClientReady } from '../lib/use-client-ready';
 
 export type Cart = {
   eventId: string;
@@ -95,28 +96,31 @@ function readOrder(data: StaffOrder): StaffOrder {
   return { order_id, state, amount, currency, expires_at, registrations };
 }
 
-export default function CajaCobros({
-  userId,
-  cart,
-  estimate,
-  onLock,
-  onReceipt,
-}: {
+type CajaProps = {
   userId: string;
   cart: Cart | null;
   estimate: number;
   onLock: (locked: boolean) => void;
   onReceipt: (order: StaffOrder, cart: Cart, method: Channel) => void | Promise<void>;
-}) {
+};
+export default function CajaCobros(props: CajaProps) {
+  const ready = useClientReady();
+  return ready ? <CajaBody key={props.userId} {...props} /> : null;
+}
+function CajaBody({ userId, cart, estimate, onLock, onReceipt }: CajaProps) {
   const key = `actv-caja-cobro:${userId}`;
-  const [ready, setReady] = useState(false);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [restored] = useState(() => {
+    try { const saved = sessionStorage.getItem(key); return { draft: saved ? JSON.parse(saved) as Draft : null, failed: false }; }
+    catch { return { draft: null, failed: true }; }
+  });
+  const ready = !restored.failed;
+  const [draft, setDraft] = useState<Draft | null>(restored.draft);
   const [channel, setChannel] = useState<Channel>('cash');
   const [shift, setShift] = useState<Shift | null>(null);
   const [closedShift, setClosedShift] = useState<Shift | null>(null);
   const [shiftAmount, setShiftAmount] = useState('');
-  const [tender, setTender] = useState('');
-  const [message, setMessage] = useState('');
+  const [tender, setTender] = useState(restored.draft?.received === undefined ? '' : (restored.draft.received / 100).toFixed(2));
+  const [message, setMessage] = useState(restored.failed ? 'La sesión local de Caja no está disponible. Recupera cualquier cobro con conciliación antes de continuar.' : '');
   const [reader, setReader] = useState<{ status: string | null; provider: string | null }>({ status: null, provider: null });
   const [loading, setLoading] = useState(false);
   const [sales, setSales] = useState<SalesStatus | null>(null);
@@ -124,23 +128,25 @@ export default function CajaCobros({
   const [recent, setRecent] = useState<RecoverableOrder[]>([]);
   const [recoveryId, setRecoveryId] = useState('');
   const busy = useRef(false);
-  const [policy, setPolicy] = useState<RegistrationPolicy | null>(null);
-  const [policyReady, setPolicyReady] = useState(false);
+  const [policyValue, setPolicy] = useState<RegistrationPolicy | null>(null);
+  const [policyEvent, setPolicyEvent] = useState<string>();
   const [acceptance, setAcceptance] = useState<Record<string, { notice: boolean; waiver: boolean }>>({});
   const cartEvent = cart?.eventId;
+  const policy = policyEvent === cartEvent ? policyValue : null;
+  const policyReady = Boolean(policy);
   const policyGeneration = useRef(0);
   const readPolicy = useCallback(async () => {
     const generation = ++policyGeneration.current;
-    setPolicy(null); setPolicyReady(false); setAcceptance({});
     if (!cartEvent) return;
     const { data, error } = await supabase.rpc('actv_registration_policy', { p_event_id: cartEvent });
     if (generation !== policyGeneration.current) return;
     if (error) throw new Error('No se pudo consultar la información de inscripción. Actualiza antes de preparar la orden.');
-    setPolicy(data as RegistrationPolicy); setPolicyReady(true);
+    setPolicy(data as RegistrationPolicy); setPolicyEvent(cartEvent); setAcceptance({});
   }, [cartEvent]);
   useEffect(() => {
+    const generation = policyGeneration.current + 1;
     void readPolicy().catch(error => setMessage(error.message));
-    return () => { policyGeneration.current++; };
+    return () => { policyGeneration.current = generation + 1; };
   }, [readPolicy]);
 
   const storeDraft = useCallback((value: Draft | null) => {
@@ -169,26 +175,23 @@ export default function CajaCobros({
 
   useEffect(() => {
     let active = true;
-    try {
-      const saved = sessionStorage.getItem(key);
-      if (saved) {
-        const previous = JSON.parse(saved) as Draft;
-        setDraft(previous);
-        onLock(true);
-        if (previous.received !== undefined) setTender((previous.received / 100).toFixed(2));
-      }
-      setReady(true);
-    } catch {
-      setMessage('La sesión local de Caja no está disponible. Recupera cualquier cobro con conciliación antes de continuar.');
-    }
-    void readShift().catch(() => {
-      if (active) setMessage('No se pudo consultar el turno de Caja. Vuelve a consultar antes de cobrar en efectivo.');
-    });
-    void readRecovery().catch(() => {
-      if (active) setMessage('No se pudo consultar la pausa de ventas y las órdenes del servidor. Consulta antes de preparar otro cobro.');
-    });
+    onLock(Boolean(restored.draft));
+    void Promise.all([supabase.rpc('actv_cash_shift'), supabase.rpc('actv_sales_status'),
+      supabase.rpc('actv_staff_recent_orders', { p_limit: 30 })]).then(([shiftResult, salesResult, ordersResult]) => {
+      if (!active) return;
+      if (shiftResult.error) setMessage('No se pudo consultar el turno de Caja. Vuelve a consultar antes de cobrar en efectivo.');
+      else setShift(shiftResult.data as Shift | null);
+      if (salesResult.error || ordersResult.error) setMessage('No se pudo consultar la pausa de ventas y las órdenes del servidor. Consulta antes de preparar otro cobro.');
+      else { setSales(salesResult.data as SalesStatus); setRecent(ordersResult.data as RecoverableOrder[]); }
+    }).catch(() => { if (active) setMessage('No se pudo consultar Caja. Verifica el turno y las órdenes antes de cobrar.'); });
     return () => { active = false; };
-  }, [key, onLock, readShift, readRecovery]);
+  }, [onLock, restored]);
+
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const run = async (operation: () => Promise<void>) => {
     if (busy.current) return;
@@ -403,7 +406,7 @@ export default function CajaCobros({
   const subtotal = order ? formatMoney(order.amount) : formatMoney(estimate);
   const received = draft?.received ?? centavos(tender);
   const pending = order?.state === 'pending';
-  const expired = pending && Date.parse(order.expires_at) <= Date.now();
+  const expired = pending && Date.parse(order.expires_at) <= now;
   const hasUnresolvedTender = Boolean(draft && cash && draft.received !== undefined && pending);
   const readerLabel = reader.status ?? reader.provider;
 

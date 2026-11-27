@@ -1,6 +1,6 @@
 # ACTV supported source candidate
 
-Version **0.2.0-rc.4**, November 26, 2026. This adds order-time registration snapshots, audited corrections and one permission-based event operations workspace. The [product board](https://github.com/users/jorgecantu276/projects/2), [scope](docs/project-scope.md), [plan](docs/implementation-plan.md), and [readiness](docs/implementation-readiness.json) remain the business/acceptance references.
+Version **0.2.0-rc.5**, November 26, 2026. This adds verified participant linking, refund recovery, event cancellation and audited attendance history. See [contracts and limits](docs/linking-refunds-history.md). The [product board](https://github.com/users/jorgecantu276/projects/2), [scope](docs/project-scope.md), [plan](docs/implementation-plan.md), and [readiness](docs/implementation-readiness.json) remain the business/acceptance references.
 
 ## Supported composition
 

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import type { OperationsEvent } from './EventOperations';
 import styles from './EventOperations.module.css';
+import EventLifecycle from './EventLifecycle';
 
 type Policy = { required_fields: string[]; notice_version: string | null; waiver_version: string | null; notice_text: string | null; waiver_text: string | null; revision: number };
 const fieldLabels: Record<string,string> = {nombre:'Nombre',apellido:'Apellido',telefono:'Teléfono',telefono_emergencia:'Teléfono de emergencia',talla_playera:'Talla',fecha_nacimiento:'Fecha de nacimiento',genero:'Género',ciudad:'Ciudad',club:'Club',email:'Correo'};
@@ -42,5 +43,6 @@ export default function EventOperationsSettings({ event, manager, onSaved }: { e
       <label className={styles.field}>Versión del aviso<input name="notice_version" defaultValue={policy.notice_version??''} maxLength={80}/></label><label className={styles.field}>Versión de exención<input name="waiver_version" defaultValue={policy.waiver_version??''} maxLength={80}/></label>
       <label className={styles.field}>Texto del aviso<textarea name="notice_text" defaultValue={policy.notice_text??''} rows={6}/></label><label className={styles.field}>Texto de exención<textarea name="waiver_text" defaultValue={policy.waiver_text??''} rows={6}/></label><button className={styles.button} disabled={busy}>Registrar política aprobada</button>
     </form></section>}
+    {event&&<EventLifecycle eventId={event.id} onChanged={()=>onSaved(event.id)}/>}
   </section>;
 }

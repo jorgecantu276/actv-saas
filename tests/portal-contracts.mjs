@@ -98,12 +98,15 @@ try {
 
   const folio = bought.registrations[0].folio;
   await denied('actv_claim_runner_folio', [race.event_id, folio], unverified);
-  await denied('actv_claim_runner_folio', [race.event_id, folio], outsider, 'P0002');
-  assert.equal(await rpc('actv_claim_runner_folio', [race.event_id, folio], runner), true);
-  assert.equal(await rpc('actv_claim_runner_folio', [race.event_id, folio], runner), true);
-  assertions += 2;
+  await denied('actv_claim_runner_folio', [race.event_id, folio], outsider);
+  await denied('actv_claim_runner_folio', [race.event_id, folio], runner);
   const roster = await rpc('actv_organizer_attendance', [race.event_id], owner);
   const registration = roster.registrations.find(entry => entry.folio === folio).registration_id;
+  const token = randomUUID().replaceAll('-', '') + randomUUID().replaceAll('-', '');
+  await rpc('actv_create_participant_invitation', [registration,email,randomUUID(),token,'Verified purchase contact for synthetic runner','buyer_contact'],runner);
+  assert.equal((await rpc('actv_accept_participant_invitation',[token],runner)).registration_id,registration);
+  assert.equal((await rpc('actv_accept_participant_invitation',[token],runner)).registration_id,registration);
+  assertions += 2;
   await denied('actv_record_attendance', [race.event_id, registration], outsider);
   await denied('actv_record_attendance', [race.event_id, registration], owner, 'P0002');
   assert.equal((await rpc('actv_runner_dashboard', [], runner)).attended_count, 0);
