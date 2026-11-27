@@ -149,6 +149,29 @@ export async function verifyOperationsBrowser(context) {
     }
     browser = await chromium.launch({ headless: true });
     const browserVersion = browser.version();
+    // Next dev recompiles shared client modules on the first public-route visit.
+    // Finish those anonymous compilations before opening any staff draft/modal;
+    // production builds serve precompiled routes and do not run this HMR path.
+    console.info('ACTV browser phase: anonymous public route warming');
+    const warming = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      await warming.route('**/*', route => {
+        const url = new URL(route.request().url());
+        if (['data:', 'blob:'].includes(url.protocol)) return route.continue();
+        if (![appOrigin, new URL(apiUrl).origin].includes(url.origin)) {
+          blockedExternal++;
+          if (/stripe|mercadopago|facebook|actv\.mx/i.test(url.hostname)) externalProviderRequests++;
+          return route.abort('blockedbyclient');
+        }
+        browserRequests++;
+        return route.continue();
+      });
+      const warmPage = await warming.newPage();
+      for (const path of ['/organizadores', '/mi-actv']) {
+        const response = await warmPage.goto(appOrigin + path, { waitUntil: 'networkidle', timeout: 90000 });
+        assert(response?.ok(), 'Owned anonymous public route must finish compiling');
+      }
+    } finally { await warming.close(); }
     const contexts = [];
     const open = async (user, viewport, expectedName = 'Browser Original Participant') => {
       const isolated = await browser.newContext({ viewport, serviceWorkers: 'block' });
@@ -242,7 +265,7 @@ export async function verifyOperationsBrowser(context) {
     restoreNextEnv();
     if (productionBuild !== null) equal(readFileSync(buildFile, 'utf8'), productionBuild);
     equal(readFileSync(join(root, 'tsconfig.json'), 'utf8'), rootTypeScriptConfig);
-    return { assertions, linking, browserVersion, actualBrowserAuthAndPostgrest: true, isolatedTemporaryBrowserContexts: true,
+    return { assertions, linking, browserVersion, actualBrowserAuthAndPostgrest: true, isolatedTemporaryBrowserContexts: true, publicRoutesWarmedAnonymously: true,
       managerCorrectionAndReceipt: true, staffAndOrganizerBoundaries: true, activeRevocation: true,
       externalRequests: blockedExternal, externalProviderRequests, fontMode: 'synthetic_local_system_fallback',
       screenshots: ['operations-desktop.png', 'operations-tablet.png'].map(path => ({ path,
