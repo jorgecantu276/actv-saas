@@ -56,7 +56,7 @@ function digests(directory) {
 
 try {
   await run('lint', node, ['node_modules/eslint/bin/eslint.js', '.']);
-  await run('unit', node, ['--test', 'ops/tests/status.test.mjs', 'tests/runner-history.test.mjs', 'tests/legacy-store.test.mjs', 'tests/candidate-composition.test.mjs', 'tests/staff-provisioning.test.mjs', 'tests/staging-bindings.test.mjs']);
+  await run('unit', node, ['--test', 'ops/tests/status.test.mjs', 'tests/runner-history.test.mjs', 'tests/legacy-store.test.mjs', 'tests/candidate-composition.test.mjs', 'tests/staff-provisioning.test.mjs', 'tests/staging-bindings.test.mjs', 'tests/release-delivery.test.mjs']);
   await run('record', node, ['ops/status.mjs', '--check']);
   await run('types', node, ['node_modules/typescript/bin/tsc', '--noEmit']);
   await run('build', node, ['node_modules/next/dist/bin/next', 'build', '--webpack']);
