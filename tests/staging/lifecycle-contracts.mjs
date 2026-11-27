@@ -16,6 +16,7 @@ export async function verifyLifecycleContracts(context) {
  const race=randomUUID(),today=(await db.query("select (now() at time zone 'America/Matamoros')::date::text value")).rows[0].value;
  await rpc(manager.client,'actv_operations_save_event',{p_event_id:race,p_values:{name:'Synthetic lifecycle',date:today,distance:'5K',capacity:20,price:500,package_name:'General',live_mode:false,online_enabled:false,slug:'lifecycle-'+randomUUID(),folio_start:900}});
  const athletes=[randomUUID(),randomUUID()];for(const [n,id] of athletes.entries())await db.query("insert into public.atletas(id,nombre,apellido,telefono,telefono_emergencia,talla_playera) values($1,$2,'Lifecycle','8685550100','8685550101','M')",[id,'Runner '+n]);
+ const freshAthlete=randomUUID();await db.query("insert into public.atletas(id,nombre,apellido,telefono,telefono_emergencia,talla_playera) values($1,'New','Lifecycle','8685550100','8685550101','M')",[freshAthlete]);
  const shift=await rpc(manager.client,'actv_open_shift',{p_opening:0});
  const order=await rpc(manager.client,'actv_create_staff_order',{p_event_id:race,p_request_id:randomUUID(),p_channel:'cash',p_items:athletes.map(athlete_id=>({athlete_id,package:1})),p_relay:false});
  await rpc(manager.client,'actv_confirm_cash',{p_order_id:order.order_id,p_shift_id:shift.id,p_received:100000});
@@ -51,7 +52,7 @@ export async function verifyLifecycleContracts(context) {
  equal((await rpc(runner.client,'actv_runner_dashboard')).registrations[0].event_date,today);
  equal(await rpc(admin,'actv_catalog',{p_event_id:race}),null);
  equal((await rpc(admin,'actv_public_races',{p_live_mode:false})).some(r=>r.event_id===race),false);
- await denied(manager.client,'actv_create_staff_order',{p_event_id:race,p_request_id:randomUUID(),p_channel:'cash',p_items:[{athlete_id:athletes[0],package:1}],p_relay:false},'23514');
+ await denied(manager.client,'actv_create_staff_order',{p_event_id:race,p_request_id:randomUUID(),p_channel:'cash',p_items:[{athlete_id:freshAthlete,package:1}],p_relay:false},'23514');
  await rpc(manager.client,'actv_transition_event',{...transition,p_request_id:randomUUID(),p_expected_revision:1,p_action:'resume',p_new_date:null});
  equal((await rpc(admin,'actv_catalog',{p_event_id:race})).event_id,race);
  await rpc(manager.client,'actv_transition_event',{...transition,p_request_id:randomUUID(),p_expected_revision:2,p_action:'pause',p_new_date:null});
@@ -77,9 +78,7 @@ export async function verifyLifecycleContracts(context) {
  equal((await db.query('select r.id,r.folio_asignado,r.actv_order_item_id from public.inscripciones r join actv_payments.items i on i.id=r.actv_order_item_id where i.order_id=$1 order by i.number',[order.order_id])).rows,regs);
  equal((await db.query('select actv_payments.used($1)::integer n',[race])).rows[0].n,2);
  equal((await rpc(manager.client,'actv_close_shift',{p_shift_id:shift.id,p_counted:0})).variance,0);
- await denied(manager.client,'actv_create_staff_order',{p_event_id:race,p_request_id:randomUUID(),p_channel:'cash',p_items:[{athlete_id:athletes[0],package:1}],p_relay:false},'23514');
+ await denied(manager.client,'actv_create_staff_order',{p_event_id:race,p_request_id:randomUUID(),p_channel:'cash',p_items:[{athlete_id:freshAthlete,package:1}],p_relay:false},'23514');
  return {assertions,checks:['terminal cancellation','scoped authorization','idempotent audited attendance corrections','immutable original observation','attendance survives cancellation and refund','original folios and capacity retained','adjusted receipt','no ordinary correction bypass']};
  }finally{await db.query('delete from actv_payments.staff_events where user_id=any($1::uuid[])',[staff]);await db.query('delete from actv_payments.staff where user_id=any($1::uuid[])',[staff]);}
 }
-
-
