@@ -56,6 +56,10 @@ export async function verifyLinkingContracts(context, retained) {
     equal((await db.query('select online_enabled from actv_payments.events where event_id=$1', [legacyRace])).rows[0].online_enabled, false);
     equal((await db.query('select actv_eligible,actv_order_item_id,monto_pagado from public.inscripciones where id=$1', [legacy])).rows[0], original);
     const unpaid = retained.linkingUnpaidRegistration;
+    // An explicitly revoked retained entry stays unusable even when a damaged
+    // old handover reservation exists. The captured numeric schema separately
+    // rejects a literal WP / Online placeholder during retained-state seeding.
+    await db.query('update public.inscripciones set actv_eligible=false where id=$1', [unpaid]);
     await denied(manager.client, 'actv_create_participant_invitation', invitation(unpaid, recipient), '23514');
     await denied(admin, 'actv_kit_evidence', { p_operator: manager.id, p_registration: unpaid, p_request: randomUUID(), p_action: 'reserve' }, '23514');
     const reserved = randomUUID();
