@@ -15,6 +15,7 @@ export async function verifyLifecycleContracts(context) {
  const manager=await identity('manager'),cashier=await identity('cashier'),runner=await identity(),outsider=await identity();
  const race=randomUUID(),today=(await db.query("select (now() at time zone 'America/Matamoros')::date::text value")).rows[0].value;
  await rpc(manager.client,'actv_operations_save_event',{p_event_id:race,p_values:{name:'Synthetic lifecycle',date:today,distance:'5K',capacity:20,price:500,package_name:'General',live_mode:false,online_enabled:false,slug:'lifecycle-'+randomUUID(),folio_start:900}});
+ const organizer=randomUUID();await db.query("insert into actv_payments.organizers(id,name) values($1,'Synthetic lifecycle organizer')",[organizer]);await db.query('update actv_payments.events set organizer_id=$1 where event_id=$2',[organizer,race]);
  const athletes=[randomUUID(),randomUUID()];for(const [n,id] of athletes.entries())await db.query("insert into public.atletas(id,nombre,apellido,telefono,telefono_emergencia,talla_playera) values($1,$2,'Lifecycle','8685550100','8685550101','M')",[id,'Runner '+n]);
  const freshAthlete=randomUUID();await db.query("insert into public.atletas(id,nombre,apellido,telefono,telefono_emergencia,talla_playera) values($1,'New','Lifecycle','8685550100','8685550101','M')",[freshAthlete]);
  const shift=await rpc(manager.client,'actv_open_shift',{p_opening:0});
@@ -36,8 +37,8 @@ export async function verifyLifecycleContracts(context) {
  equal((await rpc(manager.client,'actv_correct_attendance',{...correction,p_request_id:randomUUID(),p_expected_revision:1,p_present:true})).present,true);
  // A provider attempt accepted before cancellation remains reconcilable. Its
  // capture must not issue a new usable registration after cancellation.
- await db.query("insert into actv_payments.accounts(organizer_id,live_mode,account_id,ready) values('00000000-0000-4000-8000-000000000ac7',false,'acct_lifecycle',true) on conflict(organizer_id,live_mode) do nothing");
- const account=(await db.query("select account_id from actv_payments.accounts where organizer_id='00000000-0000-4000-8000-000000000ac7' and not live_mode")).rows[0].account_id;
+ await db.query("insert into actv_payments.accounts(organizer_id,live_mode,account_id,ready) values($1,false,'acct_lifecycle',true)",[organizer]);
+ const account=(await db.query("select account_id from actv_payments.accounts where organizer_id=$1 and not live_mode",[organizer])).rows[0].account_id;
  await db.query('update actv_payments.events set online_enabled=true where event_id=$1',[race]);
  const late=await rpc(admin,'actv_create_order',{p_event_id:race,p_request_id:randomUUID(),p_channel:'online',p_items:[{nombre:'Late',apellido:'Synthetic',telefono:'8685550100',telefono_emergencia:'8685550101',talla_playera:'M',package:1}],p_operator:null,p_relay:false,p_buyer_email:runner.email,p_live_mode:false});
  await rpc(admin,'actv_authorize_provider_attempt',{p_order_id:late.order_id,p_kind:'checkout',p_attempt:'canonical'});
