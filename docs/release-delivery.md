@@ -1,8 +1,13 @@
 # ACTV staging and release delivery
 
-`ACTV candidate verification` establishes clean exact-source CI. The separate
-`ACTV release delivery` workflow packages that source and can deliver it to the
-enrolled target. A source package is not a precompiled binary: Hostinger builds
+`ACTV candidate verification` establishes clean exact-source CI. A successful
+canonical main push automatically triggers `ACTV release delivery`, which
+packages and deploys that exact verified source to the enrolled synthetic stage.
+The controller runs reviewed default-branch code, checks the actual GitHub run
+through the API, rejects PR/fork/failed triggers and skips superseded main runs.
+Manual preparation/deployment uses the same normalized implementation path;
+production always requires explicit main dispatch and W6/environment approval.
+A source package is not a precompiled binary: Hostinger builds
 the pinned payload with the selected target configuration and Node 24. The
 release identity binds its source tree, migration/function/job inputs, public
 configuration identity and source verification evidence. The source/payload
@@ -72,9 +77,16 @@ Stripe sandbox credentials/webhook, SMTP, reconciliation/cleanup schedules,
 external alerts or physical devices. The backend receipt states those remaining
 gates. No worker or new sales is silently activated by application delivery.
 
-## Prepare or deploy staging
+## Automatic staging and manual preparation
 
-Dispatch `.github/workflows/release.yml` on the reviewed branch, with:
+After a reviewed main merge passes candidate verification, follow its automatic
+staging run. Do not dispatch another deployment for the same completed trigger.
+The controller verifies event type, canonical repository, workflow path, exact
+SHA/run and current main identity before staging can obtain environment secrets.
+Concurrency serializes the stage; a late successful old-main run is skipped.
+
+For a deliberate manual preparation or rehearsal, dispatch
+`.github/workflows/release.yml` on the reviewed branch, with:
 
 1. `source_sha`: full 40-character commit with successful candidate verification.
 2. `ci_run_id`: that exact verification run, including its retained evidence.

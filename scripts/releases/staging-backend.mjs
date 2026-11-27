@@ -65,6 +65,10 @@ export async function updateStagingBackend({ target, sourceSha, output, environm
   const query = query => api(`projects/${enrolledRef}/database/query`, { query });
   const source = readSourceManifest(sourceSha);
   const sqlFile = path => execFileSync('git', ['show', `${sourceSha}:${path}`], { cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024 });
+  const gateExists = (await query("select to_regclass('actv_payments.sales_control') is not null as present"))[0];
+  if (gateExists.present && (await query('select paused from actv_payments.sales_control'))[0]?.paused !== true) {
+    throw Error('Pause synthetic staging sales before applying a release');
+  }
   const state = (await query(`select to_regclass('actv_release.migrations') is not null as ledger,
     (select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE')::int as public_tables`))[0];
   if (!state.ledger) {
@@ -118,11 +122,11 @@ export async function updateStagingBackend({ target, sourceSha, output, environm
     // No provider key, webhook destination, mail or scheduled external action
     // is enabled by app delivery. Test-provider enrollment is a separate gate.
     writeFileSync(secrets, `ACTV_STRIPE_MODE=test\nACTV_APP_URL=${target.origin}\nACTV_STAFF_ORIGIN=${target.origin}\n`, { mode: 0o600 });
-    run(['secrets', 'set', '--project-ref', enrolledRef, '--env-file', secrets]);
+    run(['secrets', 'set', `--remote=${enrolledRef}`, '--env-file', secrets, '--yes']);
   } finally { rmSync(secretDirectory, { recursive: true, force: true }); }
   for (const name of source.functions) {
     if (!/^[a-z][a-z0-9-]+$/.test(name) || !readdirSync(join(root, 'supabase/functions')).includes(name)) throw Error('Invalid candidate function');
-    run(['functions', 'deploy', name, '--project-ref', enrolledRef, '--use-api', '--no-verify-jwt']);
+    run(['functions', 'deploy', name, `--remote=${enrolledRef}`, '--use-api', '--no-verify-jwt', '--yes']);
     console.log('Deployed staging function: ' + name);
   }
   await query("notify pgrst, 'reload schema'");

@@ -1,6 +1,9 @@
 name: ACTV release delivery
 
 on:
+  workflow_run:
+    workflows: [ACTV candidate verification]
+    types: [completed]
   workflow_dispatch:
     inputs:
       source_sha:
@@ -26,17 +29,43 @@ permissions:
   actions: read
 
 concurrency:
-  group: actv-release-${{ inputs.target }}
+  group: actv-release-${{ github.event_name == 'workflow_run' && 'staging' || inputs.target }}
   cancel-in-progress: false
 
 jobs:
+  select:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      eligible: ${{ steps.source.outputs.eligible }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      ci_run_id: ${{ steps.source.outputs.ci_run_id }}
+      target: ${{ steps.source.outputs.target }}
+      deploy: ${{ steps.source.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.2
+      - name: Select only authenticated exact-source release events
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/releases/select.mjs
+
   prepare:
+    needs: select
+    if: needs.select.outputs.eligible == 'true'
+
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ needs.select.outputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -45,9 +74,9 @@ jobs:
       - name: Validate immutable inputs and successful source run
         shell: bash
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          CI_RUN_ID: ${{ inputs.ci_run_id }}
-          TARGET: ${{ inputs.target }}
+          SOURCE_SHA: ${{ needs.select.outputs.source_sha }}
+          CI_RUN_ID: ${{ needs.select.outputs.ci_run_id }}
+          TARGET: ${{ needs.select.outputs.target }}
           GH_TOKEN: ${{ github.token }}
         run: |
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] && [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]]
@@ -59,14 +88,14 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-run.json"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: actv-source-evidence-${{ inputs.source_sha }}
-          run-id: ${{ inputs.ci_run_id }}
+          name: actv-source-evidence-${{ needs.select.outputs.source_sha }}
+          run-id: ${{ needs.select.outputs.ci_run_id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/source-evidence
       - name: Prepare exact source and public target manifest
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          TARGET: ${{ inputs.target }}
+          SOURCE_SHA: ${{ needs.select.outputs.source_sha }}
+          TARGET: ${{ needs.select.outputs.target }}
         run: >-
           node scripts/releases/package.mjs --source-sha "$SOURCE_SHA"
           --target "ops/$TARGET-target.json" --ci-run "$RUNNER_TEMP/source-run.json"
@@ -74,15 +103,15 @@ jobs:
           --output "$RUNNER_TEMP/actv-release"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: actv-${{ inputs.target }}-release-${{ inputs.source_sha }}
+          name: actv-${{ needs.select.outputs.target }}-release-${{ needs.select.outputs.source_sha }}
           path: ${{ runner.temp }}/actv-release
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
 
   staging:
-    if: inputs.deploy && inputs.target == 'staging'
-    needs: prepare
+    if: needs.select.outputs.deploy == 'true' && needs.select.outputs.target == 'staging'
+    needs: [select, prepare]
     environment:
       name: actv-staging
       url: https://staging-pdv.actv.mx
@@ -95,7 +124,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ needs.select.outputs.source_sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -104,11 +133,11 @@ jobs:
       - run: npm ci
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: actv-staging-release-${{ inputs.source_sha }}
+          name: actv-staging-release-${{ needs.select.outputs.source_sha }}
           path: ${{ runner.temp }}/actv-release
       - name: Deploy forward schema and candidate functions only to synthetic staging
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ needs.select.outputs.source_sha }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: >-
           node scripts/releases/staging-backend.mjs --source-sha "$SOURCE_SHA"
@@ -126,7 +155,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: actv-staging-deployment-${{ inputs.source_sha }}
+          name: actv-staging-deployment-${{ needs.select.outputs.source_sha }}
           path: |
             ${{ runner.temp }}/backend-receipt.json
             ${{ runner.temp }}/hosting-intent.json
@@ -135,8 +164,8 @@ jobs:
           retention-days: 90
 
   production:
-    if: inputs.deploy && inputs.target == 'production' && github.ref == 'refs/heads/main'
-    needs: prepare
+    if: needs.select.outputs.deploy == 'true' && needs.select.outputs.target == 'production' && github.ref == 'refs/heads/main'
+    needs: [select, prepare]
     environment:
       name: actv-production
       url: https://pdv.actv.mx
@@ -149,14 +178,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ needs.select.outputs.source_sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24.22.2
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: actv-production-release-${{ inputs.source_sha }}
+          name: actv-production-release-${{ needs.select.outputs.source_sha }}
           path: ${{ runner.temp }}/actv-release
       - name: Load accepted target-bound release evidence
         env:
@@ -184,7 +213,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: actv-production-deployment-${{ inputs.source_sha }}
+          name: actv-production-deployment-${{ needs.select.outputs.source_sha }}
           path: |
             ${{ runner.temp }}/hosting-intent.json
             ${{ runner.temp }}/hosting-intent.json.observed.json

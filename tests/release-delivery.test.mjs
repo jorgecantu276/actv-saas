@@ -11,6 +11,7 @@ import { migrationTransaction } from '../scripts/releases/staging-backend.mjs';
 import { deployHostinger, validateAppEnvironment } from '../scripts/releases/hostinger.mjs';
 import { sha256 } from '../scripts/releases/contract.mjs';
 import { gitObject, sourceTreeHash, verifyPayload } from '../scripts/releases/payload.mjs';
+import { selectRelease } from '../scripts/releases/select.mjs';
 
 const sourceSha = 'a'.repeat(40), hash = 'c'.repeat(64);
 const sourceFiles = [{ path: 'lib/release-identity.generated.json', gitBlob: gitObject('blob', Buffer.from('{}')), mode: '100644' }];
@@ -31,6 +32,40 @@ const evidence = { sourceSha, status: 'passed', dirtySource: false, scope: 'sour
 const manifest = { format: 'actv-release-manifest-v1', sourceSha, sourceTree, sourceFiles, inputs: [{ path: 'supabase/migrations/1.sql', sha256: hash }], target: staging };
 const backend = { format: 'actv-backend-receipt-v1', sourceSha, sourceTree, supabaseProjectRef: staging.supabaseProjectRef,
   contractSha256: digest(manifest.inputs), status: 'contract_deployed', salesPaused: true, evidenceSha256: hash };
+
+test('automatic delivery selects only successful exact canonical main push verification', async () => {
+  const observed = { ...run, name: 'ACTV candidate verification', head_branch: 'main' };
+  const event = { repository: run.repository, workflow_run: observed };
+  const selected = await selectRelease('workflow_run', event, { fetchRun: async () => observed, fetchMain: async () => sourceSha });
+  assert.deepEqual(selected, { eligible: true, source_sha: sourceSha, ci_run_id: '123', target: 'staging', deploy: true });
+});
+
+test('PR/fork/failed workflow events cannot acquire automatic staging eligibility', async () => {
+  const observed = { ...run, name: 'ACTV candidate verification', head_branch: 'main' };
+  for (const patch of [{ event: 'pull_request' }, { head_branch: 'feature' }, { conclusion: 'failure' },
+    { head_repository: { full_name: 'fork/actv-saas' } }, { name: 'Other workflow' }]) {
+    const result = await selectRelease('workflow_run', { repository: run.repository, workflow_run: { ...observed, ...patch } }, {
+      fetchRun: async () => { throw Error('Untrusted event should not reach privileged selection'); }, fetchMain: async () => sourceSha,
+    });
+    assert.equal(result.eligible, false);
+  }
+});
+
+test('late superseded main runs skip delivery and event/API source mismatches fail', async () => {
+  const observed = { ...run, name: 'ACTV candidate verification', head_branch: 'main' };
+  const event = { repository: run.repository, workflow_run: observed };
+  const result = await selectRelease('workflow_run', event, { fetchRun: async () => observed, fetchMain: async () => 'd'.repeat(40) });
+  assert.equal(result.reason, 'superseded_main_verification');
+  await assert.rejects(() => selectRelease('workflow_run', event, { fetchRun: async () => ({ ...observed, head_sha: 'd'.repeat(40) }) }), /disagrees/);
+});
+
+test('manual release uses the same normalized path and production remains main-only', async () => {
+  const event = { repository: run.repository, inputs: { source_sha: sourceSha, ci_run_id: '123', target: 'production', deploy: 'true' } };
+  await assert.rejects(() => selectRelease('workflow_dispatch', event, { ref: 'refs/heads/feature' }), /target/);
+  const selected = await selectRelease('workflow_dispatch', event, { ref: 'refs/heads/main', fetchRun: async () => run });
+  assert.equal(selected.target, 'production'); assert.equal(selected.deploy, true);
+  await assert.rejects(() => selectRelease('workflow_dispatch', { ...event, inputs: { ...event.inputs, ci_run_id: 'not-an-id' } }, { ref: 'refs/heads/main' }), /Immutable/);
+});
 
 test('staging refuses production backend, host, live provider and unexpected secret fields', () => {
   assert.equal(validateTarget(staging), staging);

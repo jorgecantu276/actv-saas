@@ -30,9 +30,10 @@ The consolidated source uses npm run verify and ops/source-candidate.json. This 
 
 ## Release delivery
 
-The manually dispatched `ACTV release delivery` workflow prepares the exact
-verified source with its public staging/production bindings. Optional deployment
-uses the enrolled synthetic staging backend and the existing hosting adapter.
+`ACTV release delivery` automatically stages successful exact main-push
+verification, rejecting PR/fork/failed or superseded triggers. Manual dispatch
+uses the same preparation/deployment path and public target bindings. Staging
+uses the enrolled synthetic backend and the existing hosting adapter.
 Production additionally requires environment approval and exact W6 evidence;
 database maintenance and W7 sales reopening remain separate. Read
 [release delivery](../docs/release-delivery.md) before dispatching. `/api/version`
