@@ -55,9 +55,9 @@ export async function seedLegacyState(context) {
   // Captured operational amounts are numeric. A stale placeholder cannot be
   // adopted as payment proof; PostgreSQL rejects it before any registration.
   await assert.rejects(db.query(`insert into public.inscripciones(id,evento_id,folio_asignado,monto_pagado,metodo_pago)
-    values($1,$2,'LEGACY-UNPAID','WP / Online','online')`, [linkingUnpaidRegistration, linkingLegacyRace]), { code: '22P02' });
+    values($1,$2,'LEGACY-UNPAID','WP / Online','efectivo')`, [linkingUnpaidRegistration, linkingLegacyRace]), { code: '22P02' });
   await db.query(`insert into public.inscripciones(id,evento_id,folio_asignado,monto_pagado,metodo_pago)
-    values($1,$2,'LEGACY-UNPAID',500,'online')`, [linkingUnpaidRegistration, linkingLegacyRace]);
+    values($1,$2,'LEGACY-UNPAID',500,'efectivo')`, [linkingUnpaidRegistration, linkingLegacyRace]);
   await db.query(`insert into public.eventos(id,nombre_carrera,fecha,organizador,distancia,precio_1,cupo_maximo)
     values($1,'Synthetic retained race',current_date+7,'ACTV','5K',500,10),
           ($2,'Synthetic other race',current_date+7,'ACTV','10K',500,10)`, [race, otherRace]);
@@ -258,3 +258,4 @@ export async function verifyStaffLifecycle(context, retained) {
     actualEdgeRevocationDenied: true,
     storagePrivacyAccepted: false, productionQualified: false };
 }
+
