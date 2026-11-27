@@ -190,7 +190,10 @@ export async function verifyOperationsBrowser(context) {
     equal((await db.query('select revision from actv_payments.registration_snapshots where registration_id=$1', [registration.id])).rows[0].revision, 1);
     equal((await db.query('select original from actv_payments.registration_snapshots where registration_id=$1', [registration.id])).rows[0].original.participant.nombre, 'Browser Original');
     equal((await db.query('select effective from actv_payments.registration_snapshots where registration_id=$1', [registration.id])).rows[0].effective.participant.nombre, 'Browser Corrected');
-    await managerPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click();
+    console.info('ACTV browser phase: original manager correction detail close');
+    await managerPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click().catch(() => {
+      throw new Error('ACTV operations browser phase failed: original manager correction detail close');
+    });
     const row = managerPage.getByRole('row').filter({ hasText: 'Browser Corrected Participant' });
     await row.waitFor(); await row.getByRole('button', { name: 'Recibo', exact: true }).click();
     const receipt = managerPage.getByRole('dialog', { name: 'Recibo de inscripción', exact: true });
@@ -213,7 +216,10 @@ export async function verifyOperationsBrowser(context) {
     const staffDetail = staffPage.getByRole('region', { name: 'Datos e historial de inscripción', exact: true });
     await staffDetail.getByText('Revisión 1 · Datos conservados al aceptar la orden', { exact: true }).waitFor();
     equal(await staffDetail.getByRole('button', { name: 'Corregir datos con motivo', exact: true }).count(), 0);
-    await staffPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click();
+    console.info('ACTV browser phase: original cashier detail close');
+    await staffPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click().catch(() => {
+      throw new Error('ACTV operations browser phase failed: original cashier detail close');
+    });
     await staffPage.screenshot({ path: join(root, '.verification/operations-tablet.png'), fullPage: true });
     const organizerPage = await open(organizer, { width: 1280, height: 900 }, 'Browser Corrected Participant');
     await organizerPage.getByRole('row').filter({ hasText: 'Browser Corrected Participant' }).waitFor();
@@ -222,6 +228,7 @@ export async function verifyOperationsBrowser(context) {
     equal(await organizerPage.getByRole('button', { name: 'Clubes', exact: true }).count(), 0);
     equal(await organizerPage.getByRole('button', { name: 'Recibo', exact: true }).count(), 0);
     check(await organizerPage.getByRole('button', { name: 'Configuración', exact: true }).isVisible());
+    console.info('ACTV browser phase: linking helper start');
     const linking = await verifyLinkingBrowser({ managerPage, browser, appOrigin, apiUrl, manager, recipient, db, rpc });
     await db.query('update actv_payments.staff set active=false where user_id=$1', [cashier.id]);
     await staffPage.reload({ waitUntil: 'domcontentloaded' });

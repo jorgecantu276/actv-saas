@@ -4,6 +4,9 @@ import { randomUUID } from 'node:crypto';
 // Runs only inside the owned browser harness and synthetic local API.
 export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, apiUrl, manager, recipient, db, rpc }) {
   assert(['127.0.0.1', 'localhost'].includes(new URL(apiUrl).hostname));
+  let phase = 'fixture';
+  const mark = name => { phase = name; console.info('ACTV linking browser phase: ' + name); };
+  try {
   let assertions = 0;
   const check = condition => { assert(condition); assertions++; };
   const race = randomUUID(), athlete = randomUUID(), raceName = 'Synthetic linking browser ' + race.slice(0, 8);
@@ -17,12 +20,14 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
   const shift = await rpc(manager.client, 'actv_open_shift', { p_opening: 50000 });
   const issued = await rpc(manager.client, 'actv_confirm_cash', { p_order_id: order.order_id, p_shift_id: shift.id, p_received: 50000 });
   const registration = issued.registrations[0];
+  mark('staff invitation navigation');
   await managerPage.goto(appOrigin + '/operaciones', { waitUntil: 'domcontentloaded' });
   await managerPage.getByLabel('Buscar carrera', { exact: true }).fill(raceName);
   await managerPage.getByRole('listitem').filter({ hasText: raceName }).getByRole('button', { name: 'Operar carrera', exact: true }).click();
   const row = managerPage.getByRole('row').filter({ hasText: 'Browser Linking Participant' });
   await row.getByRole('button', { name: 'Detalle', exact: true }).click();
   const linking = managerPage.getByRole('region', { name: 'Vinculación personal del participante', exact: true });
+  mark('staff invitation create and lost-response recovery');
   await linking.getByLabel('Correo confirmado del participante', { exact: true }).fill(recipient.email);
   await linking.getByLabel('Verificación', { exact: true }).selectOption('in_person');
   await linking.getByLabel('Motivo y referencia de verificación (sin documentos de identidad)', { exact: true }).fill('Synthetic browser direct identity attestation');
@@ -45,6 +50,7 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
       external++; return route.abort('blockedbyclient');
     });
     const page = await recipientContext.newPage(); page.setDefaultTimeout(30000);
+    mark('recipient password sign-in');
     // The supported password entry lives on the organizer account screen;
     // signing in there does not confer organizer membership or staff access.
     await page.goto(appOrigin + '/organizadores', { waitUntil: 'domcontentloaded', timeout: 90000 });
@@ -54,6 +60,7 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
     await page.getByLabel('Contraseña', { exact: true }).fill(recipient.password);
     await page.getByRole('button', { name: 'Entrar', exact: true }).click();
     await page.getByRole('button', { name: 'Cerrar sesión', exact: true }).waitFor();
+    mark('recipient invitation accept and lost-response recovery');
     await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 90000 });
     await page.route('**/rest/v1/rpc/actv_accept_participant_invitation', async route => {
       const response = await route.fetch(); assert(response.ok());
@@ -67,12 +74,15 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
     check((await db.query('select user_id from actv_payments.runner_entries where registration_id=$1', [registration.id])).rows[0].user_id === recipient.id);
     check(external === 0);
 
+    mark('staff invitation detail close after recipient flow');
     await managerPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click();
+    mark('original attendance observation');
     await row.getByRole('button', { name: 'Registrar asistencia', exact: true }).click();
     await row.getByText('Kit pendiente · Presente', { exact: false }).waitFor();
     await row.getByRole('button', { name: 'Detalle', exact: true }).click();
     const attendance = managerPage.locator('section').filter({ has: managerPage.getByRole('heading', { name: 'Historial de asistencia', exact: true }) }).last();
     await attendance.getByText('Asistencia confirmada · Revisión 0', { exact: true }).waitFor();
+    mark('audited attendance stale revision recovery');
     // Another authorized operator commits after this UI loaded its revision.
     await rpc(manager.client, 'actv_correct_attendance', { p_registration_id: registration.id, p_expected_revision: 0,
       p_request_id: randomUUID(), p_present: true, p_reason: 'Synthetic concurrent operator confirms existing observation' });
@@ -89,6 +99,7 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
     check((await db.query('select count(*)::int n from actv_payments.attendance where registration_id=$1', [registration.id])).rows[0].n === 1);
 
     const refund = managerPage.getByRole('region', { name: 'Reembolsos por participante', exact: true });
+    mark('cash participant refund');
     await refund.getByLabel(/Browser Linking Participant/).check();
     await refund.getByLabel('Motivo y decisión de acceso', { exact: true }).fill('Synthetic browser participant cancellation refund');
     await refund.getByLabel('Confirmo que entregué realmente este efectivo.', { exact: true }).check();
@@ -96,7 +107,9 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
     await refund.getByText('Operación consultada. Revisa el estado confirmado abajo.', { exact: true }).waitFor();
     await refund.getByText(/500,00.*succeeded|500\.00.*succeeded/).waitFor();
     check((await db.query('select count(*)::int n from actv_payments.runner_entries where registration_id=$1', [registration.id])).rows[0].n === 1);
+    mark('staff refund detail close');
     await managerPage.getByRole('button', { name: 'Cerrar detalle', exact: true }).click();
+    mark('event cancellation');
     await managerPage.getByRole('button', { name: 'Configuración', exact: true }).click();
     const lifecycle = managerPage.locator('section').filter({ has: managerPage.getByRole('heading', { name: 'Estado y cancelación de la carrera', exact: true }) }).last();
     await lifecycle.locator('select[name="action"]').selectOption('cancel');
@@ -106,10 +119,16 @@ export async function verifyLinkingBrowser({ managerPage, browser, appOrigin, ap
     await lifecycle.getByRole('button', { name: 'Confirmar transición', exact: true }).click();
     await lifecycle.getByText(/Estado: Cancelada/).waitFor();
     check((await db.query('select phase from actv_payments.event_lifecycle where event_id=$1', [race])).rows[0].phase === 'cancelled');
+    mark('retained personal ownership after cancellation');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByText('Vinculado a tu historial personal', { exact: true }).waitFor();
     check((await db.query('select count(*)::int n from actv_payments.runner_entries where registration_id=$1', [registration.id])).rows[0].n === 1);
     return { assertions, privateFragmentInvitation: true, lostResponseCreateAndAcceptRecovery: true, realRecipientBrowserLogin: true, auditedAttendanceCorrection: true, staleAttendanceRevisionRecovery: true,
       cashParticipantRefund: true, eventCancellation: true, preservedPersonalOwnership: true };
   } finally { await recipientContext.close(); }
+  } catch (error) {
+    // A failed goto can include the private fragment in Playwright's message.
+    // Expose only a fixed phase and error class, never URLs, DOM or tokens.
+    throw new Error('ACTV linking browser phase failed: ' + phase + ' (' + (error instanceof Error ? error.name : 'Error') + ')');
+  }
 }
